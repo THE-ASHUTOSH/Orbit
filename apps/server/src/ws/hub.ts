@@ -278,9 +278,13 @@ export class Hub {
         const tab = this.rt.tabs.require(msg.tabId);
         conn.subscriptions.add(msg.tabId);
         touchUser(conn.userId, msg.tabId);
-        // The first subscriber decides the stream size; later joiners scale the
-        // frame locally rather than forcing a resize on everyone else.
-        if (this.rt.streams.subscriberCount(msg.tabId) === 0 && msg.width && msg.height) {
+        if (config.pinViewport) {
+          // Fixed size regardless of what any client asks for. resize() is a
+          // no-op when the tab is already that size, so this is cheap.
+          await this.rt.tabs.resize(msg.tabId, config.viewport.width, config.viewport.height);
+        } else if (this.rt.streams.subscriberCount(msg.tabId) === 0 && msg.width && msg.height) {
+          // Otherwise the first subscriber decides, and later joiners scale the
+          // frame locally rather than forcing a resize on everyone else.
           await this.rt.tabs.resize(msg.tabId, msg.width, msg.height);
         }
         const { width, height } = await this.rt.streams.subscribe(msg.tabId, conn);

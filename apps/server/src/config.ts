@@ -62,6 +62,14 @@ export const config = {
     maxWidth: int(process.env.MAX_VIEWPORT_WIDTH, 1920),
     maxHeight: int(process.env.MAX_VIEWPORT_HEIGHT, 1080),
   },
+  /**
+   * Ignore the size each client asks for and always stream VIEWPORT_WIDTH x
+   * VIEWPORT_HEIGHT. Useful when the biggest client window is smaller than the
+   * resolution you want to browse at: the frame is then scaled down to fit,
+   * which shows more of the page and looks sharper on a HiDPI screen. The cost
+   * is that small clients still receive full-size frames.
+   */
+  pinViewport: bool(process.env.PIN_VIEWPORT, false),
   maxFps: int(process.env.MAX_FPS, 30),
   streamQuality: Math.min(100, Math.max(1, int(process.env.STREAM_QUALITY, 70))),
   backpressureBytes: int(process.env.BACKPRESSURE_BYTES, 256 * 1024),
