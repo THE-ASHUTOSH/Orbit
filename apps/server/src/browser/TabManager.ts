@@ -118,6 +118,7 @@ export class TabManager extends EventEmitter {
     cdp.on('Page.lifecycleEvent', (e: CdpEvent) => this.onLifecycle(e));
     cdp.on('Page.frameNavigated', (e: CdpEvent) => this.onFrameNavigated(e));
     cdp.on('Page.javascriptDialogOpening', (e: CdpEvent) => void this.onDialog(e));
+    cdp.on('Inspector.targetCrashed', (e: CdpEvent) => void this.onRendererCrash(e));
 
     await cdp.send('Target.setDiscoverTargets', { discover: true });
     await this.restoreTabs();
@@ -352,6 +353,7 @@ export class TabManager extends EventEmitter {
       await cdp.send('Page.enable', {}, s);
       await cdp.send('Runtime.enable', {}, s);
       await cdp.send('Page.setLifecycleEventsEnabled', { enabled: true }, s);
+      await cdp.send('Inspector.enable', {}, s).catch(() => {});
       await cdp.send(
         'Emulation.setDeviceMetricsOverride',
         { width: tab.width, height: tab.height, deviceScaleFactor: 1, mobile: false },
@@ -436,6 +438,25 @@ export class TabManager extends EventEmitter {
     log.info('dismissing javascript dialog', { tabId, dialog: e.params.type });
     await this.cdp!.send('Page.handleJavaScriptDialog', { accept: e.params.type === 'beforeunload' }, e.sessionId).catch(
       () => {},
+    );
+  }
+
+  /**
+   * A page's renderer died - typically memory exhaustion on a heavy page.
+   *
+   * Without this the tab becomes a zombie: the target still exists, so nothing
+   * looks broken, but no frames are ever produced again and input goes nowhere.
+   * Reloading respawns the renderer; the stream is re-armed by the listener on
+   * 'tab.crashed'.
+   */
+  private async onRendererCrash(e: CdpEvent): Promise<void> {
+    const tab = this.tabForSession(e.sessionId ?? '');
+    if (!tab) return;
+    log.error('page renderer crashed - reloading', { tabId: tab.tabId, url: tab.url });
+    tab.loading = true;
+    this.emit('tab.crashed', tab);
+    await this.cdp!.send('Page.reload', {}, tab.sessionId).catch((err) =>
+      log.warn('reload after crash failed', { tabId: tab.tabId, err }),
     );
   }
 

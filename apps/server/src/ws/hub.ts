@@ -123,6 +123,13 @@ export class Hub {
       ),
     );
     this.rt.tabs.on('tab.resized', (tab) => void this.rt.streams.restart(tab.tabId));
+    this.rt.tabs.on('tab.crashed', (tab) => {
+      // The renderer is new after a reload, so the old screencast is gone.
+      setTimeout(() => void this.rt.streams.restart(tab.tabId), 1500);
+      this.broadcast({ type: 'error', code: 'page_crashed', message: ERROR_MESSAGES.page_crashed, tabId: tab.tabId }, (c) =>
+        c.subscriptions.has(tab.tabId),
+      );
+    });
     this.rt.tabs.on('page.attached', (tab) => void this.rt.installPageHooks(tab));
 
     this.rt.browser.on('status', (status, message) => {

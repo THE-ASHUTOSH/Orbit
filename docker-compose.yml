@@ -80,7 +80,11 @@ services:
     # for scratch are writable.
     read_only: true
     tmpfs:
-      - /tmp:size=512m,mode=1777
+      # Chromium puts large temporaries here (image decode scratch, media
+      # buffers). 512m was enough to idle and not enough to browse an image-heavy
+      # page, which showed up as renderer crashes. tmpfs is sparse, so this is a
+      # ceiling, not an allocation.
+      - /tmp:size=2g,mode=1777
       - /home/browser:size=256m,uid=10001,gid=10001
 
     # Keep one runaway page from taking the host down with it.

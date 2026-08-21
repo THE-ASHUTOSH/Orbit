@@ -8,7 +8,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, statfsSync } from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { log } from '../log.js';
@@ -23,6 +23,23 @@ export interface BrowserManagerEvents {
   /** A fresh CDP connection is live: managers must re-attach their state. */
   connected: (cdp: CdpConnection) => void;
   disconnected: () => void;
+}
+
+/**
+ * Below this, Chromium's shared memory has to be redirected to /tmp with
+ * --disable-dev-shm-usage. Docker's default /dev/shm is 64MB, which is far too
+ * small; this project provisions 1GB, and using it is what keeps image-heavy
+ * pages from exhausting the general-purpose tmpfs and crashing the renderer.
+ */
+const MIN_DEV_SHM_BYTES = 256 * 1024 * 1024;
+
+function devShmTooSmall(): boolean {
+  try {
+    const st = statfsSync('/dev/shm');
+    return Number(st.bsize) * Number(st.blocks) < MIN_DEV_SHM_BYTES;
+  } catch {
+    return true; // no /dev/shm at all (macOS) - keep the workaround
+  }
 }
 
 const RESTART_BASE_MS = 1000;
@@ -91,7 +108,6 @@ export class BrowserManager extends EventEmitter {
       `--lang=${config.locale}`,
       '--no-first-run',
       '--no-default-browser-check',
-      '--disable-dev-shm-usage',
       '--password-store=basic',
       '--use-mock-keychain',
       '--force-color-profile=srgb',
@@ -108,6 +124,13 @@ export class BrowserManager extends EventEmitter {
       '--disable-ipc-flooding-protection',
       'about:blank',
     ];
+    // Only redirect shared memory to /tmp when /dev/shm is genuinely too small:
+    // doing it unconditionally trades a 1GB purpose-built mount for a smaller
+    // shared one, and image-heavy pages then crash the renderer.
+    if (devShmTooSmall()) {
+      log.warn('/dev/shm is small - redirecting Chromium shared memory to /tmp', { hint: 'raise shm_size' });
+      args.push('--disable-dev-shm-usage');
+    }
     if (config.headless) args.unshift('--headless=new');
     if (!config.chromiumSandbox) args.unshift('--no-sandbox', '--disable-setuid-sandbox');
     return args;
