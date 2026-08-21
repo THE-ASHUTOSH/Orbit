@@ -40,8 +40,13 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  /** Screen CSS pixels per page CSS pixel - what pointer maths needs. */
   const [scale, setScale] = useState(1);
+  /** Frame dimensions in DEVICE pixels (may exceed the page's CSS size). */
   const [frameSize, setFrameSize] = useState({ width: tab.width, height: tab.height });
+  /** Device pixels per CSS pixel, as reported by the server. */
+  const [density, setDensity] = useState(1);
+  const densityRef = useRef(1);
   const [hasFrame, setHasFrame] = useState(false);
 
   // Frame pump: one decode in flight, newest frame wins.
@@ -80,7 +85,13 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
       }
     };
 
-    return socket.onFrames(tab.tabId, (_header, image) => {
+    return socket.onFrames(tab.tabId, (header, image) => {
+      // Only re-render when the density actually changes; this fires per frame.
+      const d = header.scale && header.scale > 0 ? header.scale : 1;
+      if (d !== densityRef.current) {
+        densityRef.current = d;
+        setDensity(d);
+      }
       pending.current = image;
       void pump();
     });
@@ -93,7 +104,10 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
     if (!el) return;
     const measure = () => {
       const rect = el.getBoundingClientRect();
-      if (rect.width > 0 && frameSize.width > 0) setScale(rect.width / frameSize.width);
+      // The page is frameSize/density CSS pixels wide, whatever the frame's own
+      // pixel count is, so pointer coordinates scale against that.
+      const pageWidth = frameSize.width / density;
+      if (rect.width > 0 && pageWidth > 0) setScale(rect.width / pageWidth);
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -103,7 +117,7 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [frameSize.width]);
+  }, [frameSize.width, density]);
 
   const toRemote = useCallback(
     (clientX: number, clientY: number) => {
@@ -194,7 +208,7 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
       if (!canControl) return;
       const { x, y } = toRemote(e.clientX, e.clientY);
       // DOM_DELTA_LINE/PAGE come from some mice; normalise to pixels.
-      const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? frameSize.height : 1;
+      const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? frameSize.height / density : 1;
       socket.sendInput({
         type: 'input.mouse',
         event: 'wheel',
@@ -208,7 +222,7 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [canControl, frameSize.height, socket, tab.tabId, toRemote]);
+  }, [canControl, frameSize.height, density, socket, tab.tabId, toRemote]);
 
   const composing = useRef(false);
 

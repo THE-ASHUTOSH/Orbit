@@ -133,6 +133,7 @@ export class StreamManager {
             capturedAt: Date.now(),
             sentAt: Date.now(),
             format: 'jpeg',
+            scale: config.deviceScaleFactor,
           },
           image,
         ),
@@ -164,8 +165,10 @@ export class StreamManager {
         {
           format: 'jpeg',
           quality: config.streamQuality,
-          maxWidth: tab.width,
-          maxHeight: tab.height,
+          // In device pixels: capping at the CSS size would scale the extra
+          // density straight back off and waste the render cost.
+          maxWidth: Math.round(tab.width * config.deviceScaleFactor),
+          maxHeight: Math.round(tab.height * config.deviceScaleFactor),
           everyNthFrame: 1,
         },
         tab.sessionId,
@@ -229,6 +232,9 @@ export class StreamManager {
       capturedAt: md.timestamp ? Math.round(md.timestamp * 1000) : Date.now(),
       sentAt: Date.now(),
       format: 'jpeg',
+      // Frames are device pixels; page coordinates are CSS pixels. The client
+      // needs the ratio to map clicks back correctly.
+      scale: config.deviceScaleFactor,
     };
     const packet = encodeFrame(header, image);
 

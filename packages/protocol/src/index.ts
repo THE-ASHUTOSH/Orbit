@@ -343,6 +343,12 @@ export interface FrameHeader {
   /** Server clock when the frame was written to the socket. */
   sentAt: number;
   format: 'jpeg';
+  /**
+   * Device pixels per CSS pixel in this frame. width/height are device pixels,
+   * so the page's coordinate space is width/scale x height/scale - which is what
+   * input events must be expressed in.
+   */
+  scale?: number;
 }
 
 export function encodeFrame(header: FrameHeader, image: Uint8Array): Uint8Array {

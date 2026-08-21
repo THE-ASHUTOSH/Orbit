@@ -356,7 +356,7 @@ export class TabManager extends EventEmitter {
       await cdp.send('Inspector.enable', {}, s).catch(() => {});
       await cdp.send(
         'Emulation.setDeviceMetricsOverride',
-        { width: tab.width, height: tab.height, deviceScaleFactor: 1, mobile: false },
+        { width: tab.width, height: tab.height, deviceScaleFactor: config.deviceScaleFactor, mobile: false },
         s,
       );
       // Without focus emulation only the foreground tab believes it is focused,
@@ -549,7 +549,7 @@ export class TabManager extends EventEmitter {
     tab.height = h;
     await this.cdp!.send(
       'Emulation.setDeviceMetricsOverride',
-      { width: w, height: h, deviceScaleFactor: 1, mobile: false },
+      { width: w, height: h, deviceScaleFactor: config.deviceScaleFactor, mobile: false },
       tab.sessionId,
     );
     this.emit('tab.resized', tab);

@@ -70,6 +70,15 @@ export const config = {
    * is that small clients still receive full-size frames.
    */
   pinViewport: bool(process.env.PIN_VIEWPORT, false),
+  /**
+   * devicePixelRatio the page sees. Note this does NOT raise the stream's
+   * resolution: CDP screencast captures at the CSS viewport size in DIP, so the
+   * frame stays the same pixel count whatever this is set to (measured). It only
+   * changes which assets responsive sites choose to serve. Use PAGE_ZOOM plus a
+   * larger VIEWPORT to get genuinely more pixels.
+   */
+  deviceScaleFactor: Math.min(3, Math.max(1, Number(process.env.DEVICE_SCALE_FACTOR ?? 1) || 1)),
+
   maxFps: int(process.env.MAX_FPS, 30),
   streamQuality: Math.min(100, Math.max(1, int(process.env.STREAM_QUALITY, 70))),
   backpressureBytes: int(process.env.BACKPRESSURE_BYTES, 256 * 1024),
