@@ -40,14 +40,20 @@ export function TabBar({ tabs, activeTabId, users, canCreate, onSelect, onClose,
             )}
             <span className="truncate">{tab.label || tab.title || hostOf(tab.url) || 'New tab'}</span>
             <span className="ml-auto flex items-center gap-1">
-              {viewers.slice(0, 3).map((u) => (
+              {/* Who is on this tab, in each person's own colour. */}
+              {viewers.slice(0, 4).map((u) => (
                 <span
                   key={u.userId}
-                  className="size-2 rounded-full ring-1 ring-black/40"
-                  style={{ background: u.color }}
-                  title={u.displayName}
+                  className={`size-2.5 rounded-full ring-1 ring-black/60 ${u.state === 'reconnecting' ? 'animate-pulse' : ''}`}
+                  style={{ background: u.color, opacity: u.state === 'idle' ? 0.5 : 1 }}
+                  title={`${u.displayName} is on this tab`}
                 />
               ))}
+              {viewers.length > 4 && (
+                <span className="text-[10px] leading-none text-neutral-400" title={viewers.map((u) => u.displayName).join(', ')}>
+                  +{viewers.length - 4}
+                </span>
+              )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();

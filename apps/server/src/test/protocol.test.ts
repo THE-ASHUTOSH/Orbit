@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ClientMessage, decodeFrame, encodeFrame, permits, userColor, type FrameHeader } from '@orbit/protocol';
+import {
+  ClientMessage,
+  colorForIndex,
+  decodeFrame,
+  encodeFrame,
+  permits,
+  USER_COLORS,
+  userColor,
+  type FrameHeader,
+} from '@orbit/protocol';
 
 test('protocol: frame envelope round-trips header and image bytes', () => {
   const header: FrameHeader = {
@@ -82,7 +91,20 @@ test('protocol: permission ranking', () => {
   assert.equal(permits(null, 'view'), false);
 });
 
-test('protocol: user colour is stable and deterministic', () => {
+test('protocol: user colour is stable and from the palette', () => {
   assert.equal(userColor('user_abc'), userColor('user_abc'));
-  assert.notEqual(userColor('user_abc'), userColor('user_xyz'));
+  assert.ok(USER_COLORS.includes(userColor('user_abc') as (typeof USER_COLORS)[number]));
+});
+
+test('protocol: every user in a group gets a distinguishable colour', () => {
+  // The whole point of index-based assignment: no two people share a dot.
+  const palette = Array.from({ length: USER_COLORS.length }, (_, i) => colorForIndex(i));
+  assert.equal(new Set(palette).size, USER_COLORS.length, 'palette entries are unique');
+
+  // Beyond the palette it wraps to generated colours, still all distinct.
+  const extended = Array.from({ length: USER_COLORS.length + 8 }, (_, i) => colorForIndex(i));
+  assert.equal(new Set(extended).size, extended.length, 'generated colours do not repeat either');
+
+  assert.equal(colorForIndex(0), colorForIndex(0), 'stable');
+  assert.equal(colorForIndex(-5), USER_COLORS[0], 'out-of-range index is clamped');
 });

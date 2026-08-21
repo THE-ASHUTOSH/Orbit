@@ -161,6 +161,7 @@ export function createUser(username: string, password: string, role: Role, displ
     `INSERT INTO users (id, username, display_name, password_hash, role, created_at, disabled)
      VALUES (?, ?, ?, ?, ?, ?, 0)`,
   ).run(row.id, row.username, row.display_name, row.password_hash, row.role, row.created_at);
+  invalidateColorIndex();
   return row;
 }
 
@@ -169,6 +170,26 @@ export const getUserByName = (username: string) =>
 
 export const getUser = (userId: string) =>
   db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as UserRow | undefined;
+
+/**
+ * Position of each user in creation order, so every user gets a distinct colour.
+ * Cached because it is read on every presence broadcast; invalidated whenever
+ * the user set changes.
+ */
+let colorIndexCache: Map<string, number> | null = null;
+
+export function userColorIndex(userId: string): number {
+  if (!colorIndexCache) {
+    colorIndexCache = new Map();
+    const rows = db.prepare('SELECT id FROM users ORDER BY created_at, id').all() as unknown as { id: string }[];
+    rows.forEach((r, i) => colorIndexCache!.set(r.id, i));
+  }
+  return colorIndexCache.get(userId) ?? 0;
+}
+
+export const invalidateColorIndex = () => {
+  colorIndexCache = null;
+};
 
 export const listUsers = () =>
   db.prepare('SELECT * FROM users ORDER BY created_at').all() as unknown as UserRow[];
@@ -195,7 +216,10 @@ export const touchUser = (userId: string, lastTabId: string | null) =>
     .prepare('UPDATE users SET last_seen_at = ?, last_tab_id = COALESCE(?, last_tab_id) WHERE id = ?')
     .run(Date.now(), lastTabId, userId);
 
-export const deleteUser = (userId: string) => void db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+export const deleteUser = (userId: string) => {
+  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+  invalidateColorIndex();
+};
 
 // --- sessions --------------------------------------------------------------
 

@@ -226,7 +226,12 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
           <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] text-amber-300">{state.status}</span>
         )}
         <span className="ml-auto flex items-center gap-3 text-xs text-neutral-400">
-          <span title={`signed in as ${self.username}`}>
+          <span className="flex items-center gap-1.5" title={`signed in as ${self.username}`}>
+            {/* Your own colour, so you know which dot is you. */}
+            <span
+              className="size-2.5 rounded-full ring-1 ring-black/60"
+              style={{ background: state?.users.find((u) => u.userId === self.userId)?.color ?? '#60a5fa' }}
+            />
             {self.displayName}
             <span className="ml-1 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400">
               {self.role}
@@ -315,6 +320,7 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
 
       <StatusBar
         users={state?.users ?? []}
+        tabs={state?.tabs ?? []}
         selfUserId={self.userId}
         status={status}
         latency={latency}

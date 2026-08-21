@@ -388,11 +388,58 @@ export function modifiersFrom(e: {
   );
 }
 
-/** Deterministic per-user colour for cursors and avatars. */
+/**
+ * Palette for per-user dots and cursors.
+ *
+ * A curated list rather than `hue = hash % 360`: adjacent hues are
+ * indistinguishable at the size of an 8px dot, and user ids share a timestamp
+ * prefix, so a plain hash regularly produced two people in near-identical
+ * colours. These twelve are far apart in hue and all readable on a dark UI.
+ */
+export const USER_COLORS = [
+  '#60a5fa', // blue
+  '#f87171', // red
+  '#34d399', // emerald
+  '#fbbf24', // amber
+  '#a78bfa', // violet
+  '#22d3ee', // cyan
+  '#f472b6', // pink
+  '#a3e635', // lime
+  '#fb923c', // orange
+  '#e879f9', // fuchsia
+  '#fde047', // yellow
+  '#94a3b8', // slate
+] as const;
+
+/**
+ * Colour for the Nth user. Assigning by position guarantees that any group of
+ * up to USER_COLORS.length people all get different colours - hashing the user
+ * id cannot promise that, and in practice collided often enough that two people
+ * regularly shared a dot.
+ *
+ * Past the curated palette it falls back to golden-angle hue rotation, which
+ * keeps successive colours as far apart as possible for any count.
+ */
+export function colorForIndex(index: number): string {
+  const i = Math.max(0, Math.floor(index));
+  if (i < USER_COLORS.length) return USER_COLORS[i]!;
+  const n = i - USER_COLORS.length;
+  const hue = Math.round((n * 137.508) % 360);
+  // Alternate lightness so a wrapped hue still reads as a different colour.
+  return `hsl(${hue} 72% ${n % 2 === 0 ? 62 : 45}%)`;
+}
+
+/**
+ * Deterministic colour from a user id alone, for callers with no index to hand.
+ * Prefer colorForIndex: this can give two users the same colour.
+ */
 export function userColor(userId: string): string {
-  let h = 0;
-  for (let i = 0; i < userId.length; i++) h = (h * 31 + userId.charCodeAt(i)) % 360;
-  return `hsl(${h} 78% 55%)`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < userId.length; i++) {
+    hash ^= userId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return USER_COLORS[hash % USER_COLORS.length]!;
 }
 
 export const ROLE_RANK: Record<Role, number> = { viewer: 0, user: 1, admin: 2 };

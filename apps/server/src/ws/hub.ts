@@ -13,7 +13,7 @@ import {
   ClientMessage,
   ERROR_MESSAGES,
   PROTOCOL_VERSION,
-  userColor,
+  colorForIndex,
   type BrowserState,
   type Cursor,
   type ErrorCode,
@@ -24,7 +24,7 @@ import {
 import { config } from '../config.js';
 import { log } from '../log.js';
 import { id } from '../ids.js';
-import { audit, getUser, touchUser, type UserRow } from '../db.js';
+import { audit, getUser, touchUser, userColorIndex, type UserRow } from '../db.js';
 import { sessionFromRequest } from '../auth/session.js';
 import { canAdminTab, canControlTab, canViewTab, effectivePermission, roleCan } from '../auth/permissions.js';
 import { isOriginAllowed } from '../api/origin.js';
@@ -336,7 +336,7 @@ export class Hub {
         perTab.set(conn.userId, {
           userId: conn.userId,
           displayName: conn.user.display_name,
-          color: userColor(conn.userId),
+          color: colorForIndex(userColorIndex(conn.userId)),
           x: msg.x,
           y: msg.y,
           active: msg.active,
@@ -429,7 +429,7 @@ export class Hub {
       username: user.username,
       displayName: user.display_name,
       role: user.role,
-      color: userColor(user.id),
+      color: colorForIndex(userColorIndex(user.id)),
       state,
       currentTabId,
       lastActivityAt: lastActivity || Date.now(),

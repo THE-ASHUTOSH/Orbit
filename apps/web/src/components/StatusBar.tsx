@@ -1,8 +1,9 @@
-import type { ServerMetrics, UserInfo } from '@orbit/protocol';
+import type { ServerMetrics, TabInfo, UserInfo } from '@orbit/protocol';
 import type { ConnectionStatus, LatencySample } from '../lib/socket';
 
 interface Props {
   users: UserInfo[];
+  tabs: TabInfo[];
   selfUserId: string;
   status: ConnectionStatus;
   latency: LatencySample;
@@ -11,14 +12,15 @@ interface Props {
   onToggleMetrics: () => void;
 }
 
-const STATE_STYLE: Record<string, string> = {
-  online: 'bg-emerald-500',
-  idle: 'bg-yellow-500',
-  reconnecting: 'bg-orange-500 animate-pulse',
-  disconnected: 'bg-neutral-600',
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
 };
 
-export function StatusBar({ users, selfUserId, status, latency, metrics, showMetrics, onToggleMetrics }: Props) {
+export function StatusBar({ users, tabs, selfUserId, status, latency, metrics, showMetrics, onToggleMetrics }: Props) {
   return (
     <div className="flex items-center gap-3 border-t border-neutral-800 bg-neutral-900 px-3 py-1.5 text-[11px] text-neutral-400">
       <span className="flex items-center gap-1.5">
@@ -27,16 +29,32 @@ export function StatusBar({ users, selfUserId, status, latency, metrics, showMet
       </span>
 
       <div className="flex flex-wrap items-center gap-2">
-        {users.map((u) => (
-          <span key={u.userId} className="flex items-center gap-1" title={`${u.username} · ${u.role} · ${u.state}`}>
-            <span className={`size-1.5 rounded-full ${STATE_STYLE[u.state] ?? 'bg-neutral-600'}`} />
-            <span className="size-2 rounded-full" style={{ background: u.color }} />
-            <span className={u.userId === selfUserId ? 'text-neutral-200' : ''}>
-              {u.displayName}
-              {u.userId === selfUserId ? ' (you)' : ''}
+        {users.map((u) => {
+          const tab = tabs.find((t) => t.tabId === u.currentTabId);
+          const where = tab ? tab.label || tab.title || hostOf(tab.url) || 'new tab' : null;
+          return (
+            <span
+              key={u.userId}
+              className="flex items-center gap-1.5"
+              style={{ opacity: u.state === 'idle' ? 0.55 : 1 }}
+              title={`${u.username} · ${u.role} · ${u.state}${where ? ` · on ${where}` : ''}`}
+            >
+              {/* One dot per person, in their colour. State is shown by the ring
+                  and opacity rather than a second dot. */}
+              <span
+                className={`size-2.5 shrink-0 rounded-full ring-1 ${
+                  u.state === 'reconnecting' ? 'animate-pulse ring-orange-400' : 'ring-black/60'
+                }`}
+                style={{ background: u.color }}
+              />
+              <span className={u.userId === selfUserId ? 'font-medium text-neutral-200' : ''}>
+                {u.displayName}
+                {u.userId === selfUserId ? ' (you)' : ''}
+              </span>
+              {where && <span className="max-w-[10rem] truncate text-neutral-500">on {where}</span>}
             </span>
-          </span>
-        ))}
+          );
+        })}
       </div>
 
       <button onClick={onToggleMetrics} className="ml-auto rounded px-2 py-0.5 hover:bg-neutral-800">
