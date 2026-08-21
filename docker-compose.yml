@@ -1,0 +1,100 @@
+# =============================================================================
+# Orbit
+#
+#   docker compose up --build
+#   then open http://<this machine's LAN IP>:3000 from any device on the network
+#
+# One service on purpose: Chromium is managed by the server process, so there is
+# no second container and no network path to the DevTools port. Postgres and
+# Redis are not here because a single-machine LAN deployment does not need them
+# (see docs/architecture.md for what changes when it does).
+# =============================================================================
+
+name: orbit
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: orbit:latest
+    container_name: orbit
+    restart: unless-stopped
+
+    # tini as PID 1: Chromium reparents helper processes, and something has to
+    # reap them or they accumulate as zombies across browser restarts.
+    init: true
+
+    # Listens on 0.0.0.0 inside the container and is published on every host
+    # interface, which is what makes http://<LAN-IP>:3000 work from other
+    # machines. Bind to a single interface with APP_BIND=192.168.1.100.
+    ports:
+      - '${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000'
+
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_PORT: 3000
+      SERVER_HOST: 0.0.0.0
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env - run "openssl rand -hex 32"}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      VIEWPORT_WIDTH: ${VIEWPORT_WIDTH:-1280}
+      VIEWPORT_HEIGHT: ${VIEWPORT_HEIGHT:-720}
+      MAX_FPS: ${MAX_FPS:-30}
+      STREAM_QUALITY: ${STREAM_QUALITY:-70}
+      MAX_TABS: ${MAX_TABS:-20}
+      MAX_USERS: ${MAX_USERS:-50}
+      # Headed Chromium on a virtual display (Xvfb, started by the entrypoint).
+      # Websites treat headless as unusual, and measurement showed headed keeps
+      # all tabs streaming concurrently - it just costs more CPU and memory.
+      # See docs/performance.md#headed-vs-headless. Set true to go back.
+      CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
+      CHROMIUM_TIMEZONE: ${CHROMIUM_TIMEZONE:-UTC}
+      # Multicast does not cross a bridge network, so .local discovery only works
+      # with network_mode: host (Linux). The IP always works either way.
+      MDNS_ENABLED: ${MDNS_ENABLED:-false}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+
+    volumes:
+      # Everything that must survive a restart: the Chromium profile (cookies,
+      # logins, localStorage, IndexedDB), the SQLite database, downloads and
+      # uploads. Nothing from the host filesystem is mounted in.
+      - browser-data:/data
+
+    # Chromium wants shared memory for the compositor; the container default of
+    # 64MB is not enough even with --disable-dev-shm-usage.
+    shm_size: '1gb'
+
+    # --- hardening -----------------------------------------------------------
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The image itself is immutable at runtime; only the data volume and a tmpfs
+    # for scratch are writable.
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /home/browser:size=256m,uid=10001,gid=10001
+
+    # Keep one runaway page from taking the host down with it.
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-4.0}'
+          memory: ${MEMORY_LIMIT:-4g}
+
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+volumes:
+  browser-data:
+    name: orbit-data

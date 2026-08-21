@@ -1,0 +1,343 @@
+#!/usr/bin/env bash
+#
+# orbit - one entry point for running the orbit.
+#
+# Only wraps the things that are genuinely fiddly: first-run .env setup, waiting
+# for the container to be healthy, working out the LAN URL, the admin login
+# cookie dance, and the volume backup incantations. Everything else just calls
+# `docker compose` or `npm`, because those are already one command.
+#
+#   ./orbit help
+#
+set -euo pipefail
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+PORT="${APP_PORT:-3000}"
+LOCAL="http://127.0.0.1:${PORT}"
+
+die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+info() { printf '\033[36m>\033[0m %s\n' "$*"; }
+
+# The address other machines on the network can reach.
+lan_ip() {
+  local ip=""
+  case "$(uname -s)" in
+    Darwin)
+      for dev in en0 en1 en2; do
+        ip="$(ipconfig getifaddr "$dev" 2>/dev/null || true)"
+        [ -n "$ip" ] && break
+      done
+      ;;
+    *)
+      ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
+      [ -n "$ip" ] || ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+      ;;
+  esac
+  printf '%s' "${ip:-127.0.0.1}"
+}
+
+pretty() { if command -v python3 >/dev/null 2>&1; then python3 -m json.tool 2>/dev/null || cat; else cat; fi; }
+
+# Create .env on first run: a random signing secret, and an admin password the
+# operator types rather than one baked into a file in git history.
+ensure_env() {
+  [ -f .env ] && return 0
+  info "no .env yet - creating one"
+  command -v openssl >/dev/null 2>&1 || die "openssl is needed to generate SESSION_SECRET"
+  local pw pw2
+  read -rsp "  choose an admin password (8+ chars): " pw; echo
+  read -rsp "  again: " pw2; echo
+  [ "$pw" = "$pw2" ] || die "passwords did not match"
+  [ "${#pw}" -ge 8 ] || die "password must be at least 8 characters"
+  { grep -vE '^(SESSION_SECRET|ADMIN_PASSWORD)=' .env.example
+    echo "SESSION_SECRET=$(openssl rand -hex 32)"
+    echo "ADMIN_PASSWORD=${pw}"
+  } > .env
+  chmod 600 .env
+  info "wrote .env (chmod 600)"
+}
+
+load_env() {
+  [ -f .env ] || die "no .env - run: ./orbit up"
+  set -a; . ./.env; set +a
+  : "${ADMIN_USERNAME:=admin}"
+}
+
+# Authenticated admin session, as a Cookie header value.
+login() {
+  load_env
+  local cookie
+  cookie="$(curl -s -i -X POST "${LOCAL}/api/auth/login" \
+      -H 'Content-Type: application/json' \
+      -d "{\"username\":\"${ADMIN_USERNAME}\",\"password\":\"${ADMIN_PASSWORD}\"}" \
+    | grep -i '^set-cookie:' | sed 's/.*: //; s/;.*//' | tr -d '\r')"
+  if [ -z "$cookie" ]; then
+    die "login failed as '${ADMIN_USERNAME}'.
+  - server not up?            ./orbit status
+  - changed ADMIN_PASSWORD in .env after the first run? It only ever seeds an
+    EMPTY database, so the stored password is still the old one. Either use the
+    old password, or start fresh with: ./orbit kill --purge"
+  fi
+  printf '%s' "$cookie"
+}
+
+wait_healthy() {
+  local deadline=$(( SECONDS + 90 ))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if curl -fsS -m 3 "${LOCAL}/api/health" >/dev/null 2>&1; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
+
+cmd_up() {
+  ensure_env
+  info "building and starting"
+  docker compose up -d --build
+  info "waiting for the browser to come up"
+  if wait_healthy; then
+    curl -s "${LOCAL}/api/health" | pretty
+    cmd_url
+  else
+    printf '\033[33m>\033[0m not healthy yet - check: ./orbit logs\n'
+    exit 1
+  fi
+}
+
+cmd_down() {
+  if [ "${1:-}" = "--wipe" ]; then
+    printf 'This deletes all users, sessions AND every login inside the browser.\n'
+    read -rp 'Type WIPE to confirm: ' answer
+    [ "$answer" = "WIPE" ] || die "aborted"
+    docker compose down -v
+  else
+    docker compose down
+  fi
+}
+
+# Every pattern below is anchored to this project: this repo's path, or the
+# `orbit-itest-`/`orbit-dbg-` temp profiles the tests create. A bare match on
+# "Chrome" or "node" would take down the operator's own browser and unrelated
+# work, which is the one thing a kill command must never do.
+project_process_patterns() {
+  cat <<PATTERNS
+orbit-itest-
+orbit-dbg-
+--user-data-dir=${PWD}
+tsc -b -w --preserveWatchOutput
+node --watch --enable-source-maps dist/index.js
+concurrently -k -n tsc,node
+node --test.*dist/test
+bench/benchmark.ts
+PATTERNS
+}
+
+# SIGTERM, then SIGKILL whatever is still standing. Never signals this script or
+# the shell that launched it.
+kill_matching() {
+  local pattern="$1" pids=""
+  # `--` matters: several patterns start with "--", which pgrep would otherwise
+  # parse as its own options and silently match nothing.
+  pids="$(pgrep -f -- "$pattern" 2>/dev/null | grep -vx "$$" | grep -vx "$PPID" || true)"
+  [ -n "$pids" ] || return 0
+  local count=0
+  for pid in $pids; do
+    kill -TERM "$pid" 2>/dev/null && count=$((count + 1)) || true
+  done
+  sleep 1
+  for pid in $pids; do
+    kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+  done
+  printf '%s' "$count"
+}
+
+cmd_kill() {
+  local purge=0
+  [ "${1:-}" = "--purge" ] && purge=1
+  [ -n "${1:-}" ] && [ "$purge" -eq 0 ] && die "usage: ./orbit kill [--purge]"
+
+  if [ "$purge" -eq 1 ]; then
+    cat <<'WARNING'
+--purge removes this project's entire runtime footprint:
+
+  - the container
+  - the data volume: every user, session, and every login inside the browser
+  - the built image
+  - build output (dist/, *.tsbuildinfo) and local results (bench-results/,
+    test-results/, playwright-report/)
+
+Source, .env and node_modules are kept.
+WARNING
+    read -rp 'Type PURGE to confirm: ' answer
+    [ "$answer" = "PURGE" ] || die "aborted"
+  fi
+
+  local killed=0 n=""
+  info "stopping the container"
+  if [ "$purge" -eq 1 ]; then
+    docker compose down -v --rmi local 2>&1 | sed 's/^/  /' || true
+  else
+    docker compose down 2>&1 | sed 's/^/  /' || true
+  fi
+
+  info "killing stray processes from dev, test and benchmark runs"
+  while IFS= read -r pattern; do
+    [ -n "$pattern" ] || continue
+    n="$(kill_matching "$pattern")"
+    [ -n "$n" ] && killed=$((killed + n))
+  done < <(project_process_patterns)
+
+  if [ "$purge" -eq 1 ]; then
+    info "removing build output and local results"
+    rm -rf apps/server/dist apps/web/dist packages/protocol/dist \
+           bench/bench-results test-results playwright-report \
+           apps/server/data-dev data-dev
+    # Explicit paths only, and never inside node_modules.
+    find . -name '*.tsbuildinfo' -not -path './node_modules/*' -delete 2>/dev/null || true
+  fi
+
+  printf '\n  container:  stopped and removed\n'
+  printf '  processes:  %s killed\n' "$killed"
+  if [ "$purge" -eq 1 ]; then
+    printf '  volume:     deleted (users, logins, tabs are gone)\n'
+    printf '  image:      deleted\n'
+    printf '  artifacts:  dist, tsbuildinfo, bench and test results deleted\n'
+    printf '  kept:       source, .env, node_modules (rm -rf node_modules to go further)\n\n'
+    info "rebuild from scratch with: ./orbit up"
+  else
+    printf '  data:       kept (users, logins, tabs) - ./orbit kill --purge deletes it too\n\n'
+    info "start again with: ./orbit up"
+  fi
+}
+
+cmd_status() {
+  docker compose ps
+  echo
+  curl -s -m 5 "${LOCAL}/api/health" | pretty || die "server not responding on ${LOCAL}"
+  echo
+  # Metrics need auth; skip quietly when the password is not to hand.
+  if [ -f .env ]; then
+    curl -s -m 5 "${LOCAL}/api/metrics" -H "Cookie: $(login)" | pretty || true
+  fi
+  cmd_url
+}
+
+cmd_url() {
+  printf '\n  open on this machine:  %s\n' "$LOCAL"
+  printf '  open on the LAN:       http://%s:%s\n\n' "$(lan_ip)" "$PORT"
+}
+
+cmd_logs() { docker compose logs -f --tail="${1:-100}" app; }
+
+cmd_user() {
+  local username="${1:-}" role="${2:-user}"
+  [ -n "$username" ] || die "usage: ./orbit user <username> [admin|user|viewer]"
+  case "$role" in admin|user|viewer) ;; *) die "role must be admin, user or viewer" ;; esac
+  local pw pw2
+  read -rsp "  password for ${username} (8+ chars): " pw; echo
+  read -rsp "  again: " pw2; echo
+  [ "$pw" = "$pw2" ] || die "passwords did not match"
+  curl -s -X POST "${LOCAL}/api/admin/users" -H "Cookie: $(login)" \
+    -H 'Content-Type: application/json' \
+    -d "{\"username\":\"${username}\",\"password\":\"${pw}\",\"role\":\"${role}\"}" | pretty
+}
+
+cmd_users() { curl -s "${LOCAL}/api/admin/users" -H "Cookie: $(login)" | pretty; }
+
+cmd_kick() {
+  [ -n "${1:-}" ] || die "usage: ./orbit kick <userId>   (ids from ./orbit users)"
+  curl -s -X POST "${LOCAL}/api/admin/users/${1}/disconnect" -H "Cookie: $(login)" | pretty
+}
+
+# Restarts Chromium, not the container: the profile and everyone's session survive.
+cmd_restart() {
+  curl -s -X POST "${LOCAL}/api/admin/browser/restart" -H "Cookie: $(login)" | pretty
+  info "browser restarting - clients reattach on their own"
+}
+
+cmd_bench() {
+  load_env
+  local users="${1:-10}" tabs="${2:-5}" secs="${3:-30}" base="${BASE_URL:-$LOCAL}"
+  info "benchmarking ${base}: ${users} users, ${tabs} tabs, ${secs}s"
+  BASE_URL="$base" BENCH_USER="$ADMIN_USERNAME" BENCH_PASSWORD="$ADMIN_PASSWORD" \
+    USERS="$users" TABS="$tabs" DURATION="$secs" npm run benchmark
+}
+
+cmd_backup() {
+  local out="${1:-orbit-backup-$(date +%Y%m%d-%H%M%S).tar.gz}"
+  info "stopping so Chromium flushes its profile"
+  docker compose stop
+  # Bring the browser back whatever happens: a failed tar must not leave the
+  # service down.
+  local rc=0
+  docker run --rm -v orbit-data:/data -v "$PWD":/backup alpine \
+    tar czf "/backup/${out}" -C /data . || rc=$?
+  docker compose start
+  [ "$rc" -eq 0 ] || die "backup failed (${out} may be incomplete)"
+  info "wrote ${out} ($(du -h "$out" | cut -f1))"
+}
+
+cmd_restore() {
+  local file="${1:-}"
+  [ -n "$file" ] && [ -f "$file" ] || die "usage: ./orbit restore <file.tar.gz>"
+  read -rp "Replace all current browser state with ${file}? [y/N] " answer
+  [ "$answer" = "y" ] || die "aborted"
+  docker compose down
+  local rc=0
+  docker run --rm -v orbit-data:/data -v "$PWD":/backup alpine \
+    sh -c "rm -rf /data/* && tar xzf /backup/${file} -C /data" || rc=$?
+  docker compose up -d
+  [ "$rc" -eq 0 ] || die "restore failed - the volume may be empty; the server will bootstrap a fresh admin"
+  wait_healthy && info "restored"
+}
+
+cmd_help() {
+  cat <<'USAGE'
+orbit - orbit
+
+  ./orbit up                        build, start, wait for healthy, print the URL
+  ./orbit status                    container state, health, metrics, URLs
+  ./orbit url                       just the URLs to share
+  ./orbit logs [lines]              follow the server log
+  ./orbit down [--wipe]             stop (--wipe also deletes all state)
+  ./orbit kill                      stop the container and kill every stray dev/test
+                                 process this project started (keeps your data)
+  ./orbit kill --purge              the whole project: container, data volume, image
+                                 and build output (asks for confirmation)
+
+  ./orbit user <name> [role]        create a user (prompts for the password)
+  ./orbit users                     list users
+  ./orbit kick <userId>             disconnect a user and kill their sessions
+  ./orbit restart                   restart Chromium, keeping the profile
+
+  ./orbit test                      full test suite (needs local Chrome)
+  ./orbit bench [users] [tabs] [s]  latency/throughput benchmark
+                                 BASE_URL=http://<lan-ip>:3000 ./orbit bench  to include the network
+  ./orbit dev                       run from source without Docker
+
+  ./orbit backup [file]             tar the data volume (stops the browser briefly)
+  ./orbit restore <file>            replace the data volume from a backup
+
+First run creates .env with a random SESSION_SECRET and an admin password you type.
+USAGE
+}
+
+case "${1:-help}" in
+  up)       shift; cmd_up "$@" ;;
+  down)     shift; cmd_down "$@" ;;
+  kill)     shift; cmd_kill "$@" ;;
+  status)   shift; cmd_status "$@" ;;
+  url)      shift; cmd_url "$@" ;;
+  logs)     shift; cmd_logs "$@" ;;
+  user)     shift; cmd_user "$@" ;;
+  users)    shift; cmd_users "$@" ;;
+  kick)     shift; cmd_kick "$@" ;;
+  restart)  shift; cmd_restart "$@" ;;
+  test)     shift; npm test ;;
+  bench)    shift; cmd_bench "$@" ;;
+  dev)      shift; npm run dev ;;
+  backup)   shift; cmd_backup "$@" ;;
+  restore)  shift; cmd_restore "$@" ;;
+  help|-h|--help) cmd_help ;;
+  *)        printf 'unknown command: %s\n\n' "$1"; cmd_help; exit 1 ;;
+esac

@@ -1,0 +1,11 @@
+{
+  "name": "@orbit/bench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "node --experimental-strip-types --disable-warning=ExperimentalWarning benchmark.ts"
+  },
+  "dependencies": { "@orbit/protocol": "*", "ws": "^8.18.0" },
+  "devDependencies": { "@types/ws": "^8.5.13" }
+}

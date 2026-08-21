@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+data/
+data-dev/
+bench-results/
+playwright-report/
+test-results/
+.DS_Store
+orbit-backup*.tar.gz

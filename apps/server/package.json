@@ -1,0 +1,22 @@
+{
+  "name": "@orbit/server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "concurrently -k -n tsc,node -c gray,cyan \"tsc -b -w --preserveWatchOutput\" \"node --watch --enable-source-maps dist/index.js\"",
+    "start": "node dist/index.js",
+    "test": "tsc -b && node --test --enable-source-maps dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@orbit/protocol": "*",
+    "express": "^4.21.2",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/ws": "^8.5.13"
+  }
+}
