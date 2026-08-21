@@ -21,7 +21,7 @@ export function Toolbar({ tab, canControl, onNavigate, onAction }: Props) {
   const disabled = !tab || !canControl;
 
   return (
-    <div className="flex items-center gap-1.5 border-b border-neutral-800 bg-neutral-900 px-2 py-1.5">
+    <div className="flex items-center gap-1.5 border-b border-line bg-panel px-2 py-1.5">
       <ToolButton label="Back" disabled={disabled || !tab?.canGoBack} onClick={() => onAction('back')}>
         ←
       </ToolButton>
@@ -45,7 +45,7 @@ export function Toolbar({ tab, canControl, onNavigate, onAction }: Props) {
         }}
       >
         <input
-          className="w-full rounded-full border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-xs outline-none focus:border-sky-500 disabled:opacity-60"
+          className="w-full rounded-full border border-line-2 bg-surface px-3 py-1.5 text-xs outline-none focus:border-sky-500 disabled:opacity-60"
           value={value}
           disabled={disabled}
           placeholder={canControl ? 'Search or enter address' : 'View only'}
@@ -83,7 +83,7 @@ function ToolButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className="size-7 shrink-0 rounded text-sm text-neutral-300 hover:bg-neutral-800 disabled:opacity-30"
+      className="size-7 shrink-0 rounded text-sm text-ink-2 hover:bg-elev disabled:opacity-30"
     >
       {children}
     </button>

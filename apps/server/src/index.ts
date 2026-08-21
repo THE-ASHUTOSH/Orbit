@@ -51,7 +51,13 @@ export async function startServer(opts: { waitForBrowser?: boolean } = {}): Prom
   const webRoot = resolveWebRoot();
   if (webRoot) {
     app.use(express.static(webRoot, { index: false, maxAge: '1h', etag: true }));
-    app.get(/^\/(?!api\/|ws).*/, (_req, res) => res.sendFile(path.join(webRoot, 'index.html')));
+    app.get(/^\/(?!api\/|ws).*/, (_req, res) => {
+      // The entry document names the hashed asset files, so caching it means a
+      // client can keep loading yesterday's bundle after a deploy. Assets are
+      // content-hashed and stay cacheable; only this must always be fresh.
+      res.setHeader('Cache-Control', 'no-store');
+      res.sendFile(path.join(webRoot, 'index.html'));
+    });
     log.info('serving frontend', { webRoot });
   } else {
     log.warn('frontend build not found - API only (run: npm run build)');

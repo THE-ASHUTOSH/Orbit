@@ -1,7 +1,88 @@
 @import 'tailwindcss';
 
+/*
+ * Theming.
+ *
+ * Every surface and text colour is a semantic token, so a theme is a handful of
+ * variables rather than a `dark:` variant on hundreds of elements. Tailwind's
+ * colour utilities point at the tokens, and the tokens change per theme.
+ *
+ * Three states, in the order CSS resolves them:
+ *   1. bare :root          -> light (the default when nothing else matches)
+ *   2. prefers-color-scheme -> follows the OS, unless the user picked light
+ *   3. [data-theme=...]     -> an explicit choice always wins
+ */
+@theme {
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-elev: var(--elev);
+  --color-elev-2: var(--elev-2);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-stage: var(--stage);
+}
+
 :root {
+  color-scheme: light;
+  --surface: #ffffff;
+  --panel: #f4f4f5;
+  --elev: #e4e4e7;
+  --elev-2: #d4d4d8;
+  --line: #e4e4e7;
+  --line-2: #d4d4d8;
+  --ink: #18181b;
+  --ink-2: #52525b;
+  --ink-3: #71717a;
+  /* The area around the streamed frame. Mid grey so a white page still reads as
+     a page rather than bleeding into the chrome. */
+  --stage: #a1a1aa;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --surface: #0a0a0a;
+    --panel: #171717;
+    --elev: #262626;
+    --elev-2: #404040;
+    --line: #262626;
+    --line-2: #404040;
+    --ink: #f5f5f5;
+    --ink-2: #a3a3a3;
+    --ink-3: #737373;
+    --stage: #000000;
+  }
+}
+
+:root[data-theme='dark'] {
   color-scheme: dark;
+  --surface: #0a0a0a;
+  --panel: #171717;
+  --elev: #262626;
+  --elev-2: #404040;
+  --line: #262626;
+  --line-2: #404040;
+  --ink: #f5f5f5;
+  --ink-2: #a3a3a3;
+  --ink-3: #737373;
+  --stage: #000000;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --surface: #ffffff;
+  --panel: #f4f4f5;
+  --elev: #e4e4e7;
+  --elev-2: #d4d4d8;
+  --line: #e4e4e7;
+  --line-2: #d4d4d8;
+  --ink: #18181b;
+  --ink-2: #52525b;
+  --ink-3: #71717a;
+  --stage: #a1a1aa;
 }
 
 html,

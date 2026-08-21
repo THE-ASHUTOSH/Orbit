@@ -28,16 +28,16 @@ export function Login({ onSignedIn }: { onSignedIn: (user: SelfUser) => void }) 
 
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <form onSubmit={submit} className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-6 shadow-xl">
+      <form onSubmit={submit} className="w-full max-w-sm rounded-xl border border-line bg-panel p-6 shadow-xl">
         <h1 className="text-lg font-semibold">Orbit</h1>
-        <p className="mt-1 text-xs text-neutral-400">Sign in to join the shared browser session.</p>
+        <p className="mt-1 text-xs text-ink-2">Sign in to join the shared browser session.</p>
 
-        <label className="mt-5 block text-xs font-medium text-neutral-300" htmlFor="username">
+        <label className="mt-5 block text-xs font-medium text-ink-2" htmlFor="username">
           Username
         </label>
         <input
           id="username"
-          className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-sky-500"
+          className="mt-1 w-full rounded-md border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-sky-500"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
@@ -45,13 +45,13 @@ export function Login({ onSignedIn }: { onSignedIn: (user: SelfUser) => void }) 
           required
         />
 
-        <label className="mt-3 block text-xs font-medium text-neutral-300" htmlFor="password">
+        <label className="mt-3 block text-xs font-medium text-ink-2" htmlFor="password">
           Password
         </label>
         <input
           id="password"
           type="password"
-          className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-sky-500"
+          className="mt-1 w-full rounded-md border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-sky-500"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"

@@ -23,6 +23,9 @@ import { Viewport } from './components/Viewport';
 import { StatusBar } from './components/StatusBar';
 import { Admin } from './components/Admin';
 
+/** Height of the app's own chrome: tab bar + toolbar + status bar. */
+const CHROME_HEIGHT_PX = 104;
+
 export function App() {
   const [self, setSelf] = useState<SelfUser | null>(null);
   const [booted, setBooted] = useState(false);
@@ -66,7 +69,8 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
         // Ask for a stream that matches this screen; the server clamps it and
         // the first subscriber's size wins for everyone on that tab.
         width: Math.min(1920, Math.round(window.innerWidth * (window.devicePixelRatio > 1 ? 1 : 1))),
-        height: Math.min(1080, Math.round(window.innerHeight - 140)),
+        // tab bar + toolbar + the single status bar.
+        height: Math.min(1080, Math.round(window.innerHeight - CHROME_HEIGHT_PX)),
       });
     },
     [socket],
@@ -220,40 +224,6 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
 
   return (
     <div className="relative flex h-full flex-col">
-      <header className="flex items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-3 py-2">
-        <h1 className="text-sm font-semibold">Orbit</h1>
-        {state && state.status !== 'running' && (
-          <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] text-amber-300">{state.status}</span>
-        )}
-        <span className="ml-auto flex items-center gap-3 text-xs text-neutral-400">
-          <span className="flex items-center gap-1.5" title={`signed in as ${self.username}`}>
-            {/* Your own colour, so you know which dot is you. */}
-            <span
-              className="size-2.5 rounded-full ring-1 ring-black/60"
-              style={{ background: state?.users.find((u) => u.userId === self.userId)?.color ?? '#60a5fa' }}
-            />
-            {self.displayName}
-            <span className="ml-1 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400">
-              {self.role}
-            </span>
-          </span>
-          {self.role === 'admin' && (
-            <button
-              onClick={() => setShowAdmin((v) => !v)}
-              className="rounded border border-neutral-700 px-2 py-1 hover:bg-neutral-800"
-            >
-              admin panel
-            </button>
-          )}
-          <button
-            onClick={() => void api.logout().then(onSignedOut)}
-            className="rounded px-2 py-1 hover:bg-neutral-800"
-          >
-            logout
-          </button>
-        </span>
-      </header>
-
       <TabBar
         tabs={state?.tabs ?? []}
         activeTabId={activeTabId}
@@ -312,7 +282,7 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
         )}
 
         {toast && (
-          <div className="absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-md bg-neutral-800 px-4 py-2 text-xs shadow-lg">
+          <div className="absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-md bg-elev px-4 py-2 text-xs shadow-lg">
             {toast}
           </div>
         )}
@@ -321,6 +291,10 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
       <StatusBar
         users={state?.users ?? []}
         tabs={state?.tabs ?? []}
+        browserStatus={state?.status ?? 'starting'}
+        isAdmin={self.role === 'admin'}
+        onToggleAdmin={() => setShowAdmin((v) => !v)}
+        onLogout={() => void api.logout().then(onSignedOut)}
         selfUserId={self.userId}
         status={status}
         latency={latency}
@@ -347,10 +321,10 @@ function FileChooser({
   onCancel: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-sm rounded-lg border border-neutral-700 bg-neutral-900 p-4">
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-stage/60 p-4">
+      <div className="w-full max-w-sm rounded-lg border border-line-2 bg-panel p-4">
         <h3 className="text-sm font-semibold">The page is asking for a file</h3>
-        <p className="mt-1 text-xs text-neutral-400">
+        <p className="mt-1 text-xs text-ink-2">
           Your selection is uploaded to the server, then attached to the page's file input.
         </p>
         <input
@@ -359,7 +333,7 @@ function FileChooser({
           className="mt-3 w-full text-xs"
           onChange={(e) => onPick(Array.from(e.target.files ?? []))}
         />
-        <button onClick={onCancel} className="mt-3 rounded bg-neutral-800 px-3 py-1.5 text-xs hover:bg-neutral-700">
+        <button onClick={onCancel} className="mt-3 rounded bg-elev px-3 py-1.5 text-xs hover:bg-elev-2">
           Cancel
         </button>
       </div>
@@ -368,5 +342,5 @@ function FileChooser({
 }
 
 const Splash = ({ message }: { message: string }) => (
-  <div className="flex h-full items-center justify-center text-sm text-neutral-500">{message}</div>
+  <div className="flex h-full items-center justify-center text-sm text-ink-3">{message}</div>
 );

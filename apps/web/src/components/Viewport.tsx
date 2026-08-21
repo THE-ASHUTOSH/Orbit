@@ -283,14 +283,15 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
   const overlayCursors = useMemo(() => cursors.filter((c) => c.userId !== selfUserId), [cursors, selfUserId]);
 
   return (
-    <div ref={wrapRef} className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black">
+    <div ref={wrapRef} className="relative flex h-full w-full items-center justify-center overflow-hidden bg-stage">
       <div className="relative" style={{ maxWidth: '100%', maxHeight: '100%' }}>
         <canvas
           ref={canvasRef}
           width={frameSize.width}
           height={frameSize.height}
           className="viewport-surface block max-h-full max-w-full object-contain"
-          style={{ maxHeight: 'calc(100vh - 8.5rem)' }}
+          // Leaves room for the tab bar, toolbar and the single status bar.
+          style={{ maxHeight: 'calc(100vh - 6.5rem)' }}
         />
 
         {/* Transparent input catcher: keyboard, IME, paste, pointer, touch. */}
@@ -355,7 +356,7 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
         ))}
 
         {!hasFrame && (
-          <div className="absolute inset-0 flex items-center justify-center bg-neutral-900/90 text-sm text-neutral-400">
+          <div className="absolute inset-0 flex items-center justify-center bg-panel/90 text-sm text-ink-2">
             <span className="animate-pulse">Waiting for the first frame…</span>
           </div>
         )}
