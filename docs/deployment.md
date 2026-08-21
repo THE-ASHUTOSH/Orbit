@@ -16,7 +16,7 @@ docker compose up --build
 
 `./orbit help` lists the operational commands (users, logs, restart, bench, backup).
 
-Then, from any device on the same network, open `http://<server-lan-ip>:3000`.
+Then, from any device on the same network, open `http://<server-lan-ip>:3030`.
 
 Compose refuses to start if `SESSION_SECRET` or `ADMIN_PASSWORD` is unset - that
 is deliberate, not a bug.
@@ -36,7 +36,7 @@ Dockerfile saves roughly 200 MB if you never browse CJK content.
 The server also prints it at startup:
 
 ```json
-{"level":"info","msg":"listening","url":"http://192.168.1.100:3000","host":"0.0.0.0","port":3000}
+{"level":"info","msg":"listening","url":"http://192.168.1.100:3030","host":"0.0.0.0","port":3030}
 ```
 
 Use an address on the same subnet as your clients (`192.168.x.x`, `10.x.x.x`,
@@ -45,14 +45,14 @@ address means DHCP failed.
 
 ## Firewall
 
-Inbound TCP 3000 must be allowed on the server.
+Inbound TCP 3030 must be allowed on the server.
 
 ```bash
 # Linux, ufw
-sudo ufw allow 3000/tcp
+sudo ufw allow 3030/tcp
 
 # Linux, firewalld
-sudo firewall-cmd --add-port=3000/tcp --permanent && sudo firewall-cmd --reload
+sudo firewall-cmd --add-port=3030/tcp --permanent && sudo firewall-cmd --reload
 ```
 
 **macOS**: Docker Desktop publishes ports through its own VM; the first
@@ -64,7 +64,7 @@ incoming connections".
 
 ```powershell
 New-NetFirewallRule -DisplayName "Orbit" -Direction Inbound `
-  -LocalPort 3000 -Protocol TCP -Action Allow -Profile Private
+  -LocalPort 3030 -Protocol TCP -Action Allow -Profile Private
 ```
 
 Many Wi-Fi networks (guest, hotel, some corporate) enable *client isolation*,
@@ -164,7 +164,7 @@ docker compose up -d
 ```bash
 docker compose ps                     # health status
 docker compose logs -f app            # structured JSON logs
-curl -s localhost:3000/api/health     # liveness, no auth needed
+curl -s localhost:3030/api/health     # liveness, no auth needed
 docker compose restart app            # full restart
 docker stats orbit    # live CPU/memory
 ```
@@ -178,14 +178,14 @@ log. `POST /api/admin/browser/restart` does the same thing headlessly.
 Not required, and not enabled by default. The architecture already supports it:
 
 ```
-Internet → reverse proxy (TLS) → app:3000 → Chromium
+Internet → reverse proxy (TLS) → app:3030 → Chromium
 ```
 
 Caddy, which is the least work for automatic certificates:
 
 ```caddyfile
 browser.example.com {
-    reverse_proxy localhost:3000
+    reverse_proxy localhost:3030
 }
 ```
 
@@ -193,7 +193,7 @@ nginx needs the WebSocket upgrade spelled out:
 
 ```nginx
 location / {
-    proxy_pass http://127.0.0.1:3000;
+    proxy_pass http://127.0.0.1:3030;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -212,7 +212,7 @@ TRUST_PROXY=true
 TRUSTED_ORIGINS=https://browser.example.com
 ```
 
-Do not publish port 3000 to the Internet directly, and read
+Do not publish port 3030 to the Internet directly, and read
 [security.md](security.md#before-exposing-this-to-the-internet) first - a shared
 browser is as sensitive as every account it is signed into.
 
@@ -228,7 +228,7 @@ Needs Chromium or Chrome on the host; set `CHROMIUM_PATH` if it is somewhere
 unusual. Development mode with hot reload:
 
 ```bash
-npm run dev     # server on :3000 (tsc --watch), Vite on :5173 proxying to it
+npm run dev     # server on :3030 (tsc --watch), Vite on :5173 proxying to it
 ```
 
 ## Upgrading

@@ -12,8 +12,14 @@
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PORT="${APP_PORT:-3000}"
+# Read .env before deriving the URL so APP_PORT set there is honoured. An
+# explicit `if` rather than `&&` because this runs at top level under `set -e`.
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
+PORT="${APP_PORT:-3030}"
 LOCAL="http://127.0.0.1:${PORT}"
+# Must match volumes.browser-data.name in docker-compose.yml. Backup and restore
+# address the volume directly, so a rename there has to be reflected here.
+DATA_VOLUME="${DATA_VOLUME:-orbit-data}"
 
 die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 info() { printf '\033[36m>\033[0m %s\n' "$*"; }
@@ -270,7 +276,7 @@ cmd_backup() {
   # Bring the browser back whatever happens: a failed tar must not leave the
   # service down.
   local rc=0
-  docker run --rm -v orbit-data:/data -v "$PWD":/backup alpine \
+  docker run --rm -v "${DATA_VOLUME}":/data -v "$PWD":/backup alpine \
     tar czf "/backup/${out}" -C /data . || rc=$?
   docker compose start
   [ "$rc" -eq 0 ] || die "backup failed (${out} may be incomplete)"
@@ -284,7 +290,7 @@ cmd_restore() {
   [ "$answer" = "y" ] || die "aborted"
   docker compose down
   local rc=0
-  docker run --rm -v orbit-data:/data -v "$PWD":/backup alpine \
+  docker run --rm -v "${DATA_VOLUME}":/data -v "$PWD":/backup alpine \
     sh -c "rm -rf /data/* && tar xzf /backup/${file} -C /data" || rc=$?
   docker compose up -d
   [ "$rc" -eq 0 ] || die "restore failed - the volume may be empty; the server will bootstrap a fresh admin"
@@ -312,7 +318,7 @@ orbit - orbit
 
   ./orbit test                      full test suite (needs local Chrome)
   ./orbit bench [users] [tabs] [s]  latency/throughput benchmark
-                                 BASE_URL=http://<lan-ip>:3000 ./orbit bench  to include the network
+                                 BASE_URL=http://<lan-ip>:3030 ./orbit bench  to include the network
   ./orbit dev                       run from source without Docker
 
   ./orbit backup [file]             tar the data volume (stops the browser briefly)

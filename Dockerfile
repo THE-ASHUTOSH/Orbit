@@ -72,7 +72,7 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 ENV DISPLAY=:99 \
     NODE_ENV=production \
-    APP_PORT=3000 \
+    APP_PORT=3030 \
     SERVER_HOST=0.0.0.0 \
     DATA_DIR=/data \
     CHROMIUM_PATH=/usr/bin/chromium \
@@ -84,11 +84,11 @@ ENV DISPLAY=:99 \
     HOME=/home/browser
 
 USER browser
-EXPOSE 3000
+EXPOSE 3030
 # CDP (9222) is deliberately NOT exposed and is bound to loopback.
 
 HEALTHCHECK --interval=20s --timeout=5s --start-period=45s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.APP_PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.APP_PORT||3030)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "--enable-source-maps", "apps/server/dist/index.js"]

@@ -1,6 +1,6 @@
 /**
  * Tiny mDNS responder: answers A queries for "<hostname>.local" with this
- * machine's LAN address, so users can type http://shared-browser.local:3000
+ * machine's LAN address, so users can type http://shared-browser.local:3030
  * instead of memorising an IP.
  *
  * Hand-rolled on node:dgram because the alternative (bonjour/mdns packages)

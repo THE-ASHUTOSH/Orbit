@@ -113,7 +113,7 @@ Point `BASE_URL` at the server's LAN IP **from another machine** to include real
 network transit - that is the measurement that matches what users feel:
 
 ```bash
-BASE_URL=http://192.168.1.100:3000 BENCH_PASSWORD=... npm run benchmark
+BASE_URL=http://192.168.1.100:3030 BENCH_PASSWORD=... npm run benchmark
 ```
 
 `BENCH_TARGET` defaults to the server's own `/selftest` page, so the benchmark

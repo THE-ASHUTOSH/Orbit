@@ -2,7 +2,7 @@
 # Orbit
 #
 #   docker compose up --build
-#   then open http://<this machine's LAN IP>:3000 from any device on the network
+#   then open http://<this machine's LAN IP>:3030 from any device on the network
 #
 # One service on purpose: Chromium is managed by the server process, so there is
 # no second container and no network path to the DevTools port. Postgres and
@@ -26,16 +26,16 @@ services:
     init: true
 
     # Listens on 0.0.0.0 inside the container and is published on every host
-    # interface, which is what makes http://<LAN-IP>:3000 work from other
+    # interface, which is what makes http://<LAN-IP>:3030 work from other
     # machines. Bind to a single interface with APP_BIND=192.168.1.100.
     ports:
-      - '${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000'
+      - '${APP_BIND:-0.0.0.0}:${APP_PORT:-3030}:3030'
 
     env_file:
       - path: .env
         required: false
     environment:
-      APP_PORT: 3000
+      APP_PORT: 3030
       SERVER_HOST: 0.0.0.0
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}

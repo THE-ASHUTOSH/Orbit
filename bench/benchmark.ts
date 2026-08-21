@@ -12,13 +12,13 @@
  *
  * Usage:
  *   npm run benchmark
- *   USERS=10 TABS=5 DURATION=30 BASE_URL=http://192.168.1.100:3000 npm run benchmark
+ *   USERS=10 TABS=5 DURATION=30 BASE_URL=http://192.168.1.100:3030 npm run benchmark
  */
 import { WebSocket } from 'ws';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { decodeFrame, type ServerMessage } from '@orbit/protocol';
 
-const BASE_URL = process.env.BASE_URL ?? 'http://127.0.0.1:3000';
+const BASE_URL = process.env.BASE_URL ?? 'http://127.0.0.1:3030';
 const USERS = Number(process.env.USERS ?? 10);
 const TABS = Number(process.env.TABS ?? 5);
 const DURATION_S = Number(process.env.DURATION ?? 30);

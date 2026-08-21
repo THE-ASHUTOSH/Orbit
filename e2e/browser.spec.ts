@@ -15,10 +15,10 @@ const USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
  * Address-bar URLs are resolved by the REMOTE browser, not by the test browser,
  * so they must be absolute and reachable from inside the container. The server's
  * own animated self-test page is served at /selftest on its own port, which is
- * why 127.0.0.1:3000 is correct here even when the test drives it from the host.
+ * why 127.0.0.1:3030 is correct here even when the test drives it from the host.
  * (Typing a bare path would be treated as a search - correctly.)
  */
-const REMOTE_SELFTEST = process.env.SELFTEST_URL ?? 'http://127.0.0.1:3000/selftest';
+const REMOTE_SELFTEST = process.env.SELFTEST_URL ?? 'http://127.0.0.1:3030/selftest';
 
 async function signIn(page: Page, username = USERNAME, password = PASSWORD) {
   await page.goto('/');

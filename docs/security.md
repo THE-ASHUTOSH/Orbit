@@ -133,7 +133,7 @@ deploy.resources.limits: { cpus: '4.0', memory: 4g }
 ```
 
 Runs as uid 10001 (`browser`), never root. Root filesystem immutable; only the
-data volume and two tmpfs mounts are writable. No Docker socket. Only port 3000
+data volume and two tmpfs mounts are writable. No Docker socket. Only port 3030
 published.
 
 **Chromium's own sandbox is disabled** (`--no-sandbox`), because the user

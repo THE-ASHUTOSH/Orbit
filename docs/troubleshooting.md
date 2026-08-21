@@ -4,7 +4,7 @@ Start here, in this order:
 
 ```bash
 docker compose ps                        # is it up, is it healthy
-curl -s localhost:3000/api/health        # what does it think its status is
+curl -s localhost:3030/api/health        # what does it think its status is
 docker compose logs --tail=100 app       # what went wrong, in JSON
 ```
 
@@ -18,13 +18,13 @@ latency.
 
 Work outwards:
 
-1. **On the server**: `curl -s localhost:3000/api/health`. If this fails the app
+1. **On the server**: `curl -s localhost:3030/api/health`. If this fails the app
    is the problem, not the network - see the next section.
 2. **Right address?** `docker compose logs app | grep listening`. Use an address
    on the client's subnet.
 3. **Reachable at all?** From the client: `ping <server-ip>`. If ping fails it is
    the network or Wi-Fi client isolation, not this app.
-4. **Port open?** From the client: `curl -v http://<server-ip>:3000/api/health`.
+4. **Port open?** From the client: `curl -v http://<server-ip>:3030/api/health`.
    A hang means a firewall; connection refused means nothing is listening on
    that interface.
 5. **Firewall / isolation**: see [deployment.md](deployment.md#firewall). Guest

@@ -13,7 +13,7 @@ jar, one set of logins, one profile.
                           LOCAL NETWORK
    Laptop A          Laptop B          Phone C          Tablet D
       │                 │                 │                │
-      └─────────────────┴──── :3000 ──────┴────────────────┘
+      └─────────────────┴──── :3030 ──────┴────────────────┘
                               │
                     ┌─────────┴──────────┐
                     │  auth · presence   │
@@ -199,14 +199,14 @@ cannot touch your own browser or unrelated work.
 Run the benchmark across the real network by pointing it at the LAN address:
 
 ```bash
-BASE_URL=http://192.168.1.100:3000 ./orbit bench
+BASE_URL=http://192.168.1.100:3030 ./orbit bench
 ```
 
 ## Development
 
 ```bash
 npm install
-npm run dev         # API on :3000, Vite on :5173 with proxying
+npm run dev         # API on :3030, Vite on :5173 with proxying
 npm run typecheck
 npm test
 npm run build
@@ -256,7 +256,7 @@ ADMIN_PASSWORD=... npm run test:e2e
 | | Verified by |
 |---|---|
 | 1. `docker compose up --build` | `docker compose ps` → healthy; `/api/health` → `running` |
-| 2-3. Two machines open `http://SERVER_IP:3000` | server binds `0.0.0.0`; port published; see [deployment.md](docs/deployment.md#firewall) |
+| 2-3. Two machines open `http://SERVER_IP:3030` | server binds `0.0.0.0`; port published; see [deployment.md](docs/deployment.md#firewall) |
 | 4. Create two tabs | integration: *distinct stable ids* |
 | 5. A → tab 1, B → tab 2 | integration: *both get frames, no cross-delivery* |
 | 6-7. Simultaneous navigation and typing | integration: *pages report exactly what each user typed* |

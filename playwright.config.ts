@@ -5,7 +5,7 @@ import { defineConfig } from '@playwright/test';
  * (`npx playwright install chromium`) and a running server:
  *
  *   docker compose up -d
- *   BASE_URL=http://127.0.0.1:3000 ADMIN_PASSWORD=... npm run test:e2e
+ *   BASE_URL=http://127.0.0.1:3030 ADMIN_PASSWORD=... npm run test:e2e
  *
  * The protocol, arbiter and recovery paths are already covered headlessly by
  * apps/server/src/test/integration.test.ts against a real Chromium; these tests
@@ -19,7 +19,7 @@ export default defineConfig({
   fullyParallel: false,
   reporter: [['list']],
   use: {
-    baseURL: process.env.BASE_URL ?? 'http://127.0.0.1:3000',
+    baseURL: process.env.BASE_URL ?? 'http://127.0.0.1:3030',
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },

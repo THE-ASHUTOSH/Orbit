@@ -27,7 +27,7 @@ const dataRoot = process.env.DATA_DIR || (existsSync('/data') ? '/data' : path.r
 export const config = {
   env: process.env.NODE_ENV ?? 'development',
   isProd: process.env.NODE_ENV === 'production',
-  port: int(process.env.APP_PORT, 3000),
+  port: int(process.env.APP_PORT, 3030),
   host: process.env.SERVER_HOST || '0.0.0.0',
   logLevel: (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
 
