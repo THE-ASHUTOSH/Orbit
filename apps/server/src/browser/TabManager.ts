@@ -54,6 +54,16 @@ export function normalizeUrl(input: string): string | null {
   }
 }
 
+/**
+ * Which URL a tab should open: what was asked for, else the configured home,
+ * falling back to about:blank when neither is a usable http(s) address.
+ */
+export function resolveTabUrl(requested: string | null | undefined, home: string): string {
+  const wanted = requested ?? home;
+  if (!wanted || wanted === 'about:blank') return 'about:blank';
+  return normalizeUrl(wanted) ?? 'about:blank';
+}
+
 export class TabManager extends EventEmitter {
   private tabs = new Map<string, Tab>();
   private byTarget = new Map<string, string>();
@@ -192,7 +202,8 @@ export class TabManager extends EventEmitter {
       }).catch((err) => log.warn('tab restore failed', { tabId: row.id, err }));
     }
 
-    if (this.tabs.size === 0) await this.createTab({ url: 'about:blank', createdBy: null });
+    // No url: createTab falls back to HOME_URL.
+    if (this.tabs.size === 0) await this.createTab({ createdBy: null });
     log.info('tabs restored', { count: this.tabs.size, reclaimed: claimed.length, recreated: orphaned.length });
   }
 
@@ -212,7 +223,7 @@ export class TabManager extends EventEmitter {
     if (this.tabs.size >= config.maxTabs && !opts.reuseTabId) throw new Error('tab_limit');
 
     const tabId = opts.reuseTabId ?? id('tab');
-    const url = opts.url && opts.url !== 'about:blank' ? (normalizeUrl(opts.url) ?? 'about:blank') : 'about:blank';
+    const url = resolveTabUrl(opts.url, config.homeUrl);
     // Headless composites every page target, so tabs can share one window. A
     // headed browser only composites the focused window, so each tab gets its
     // own - otherwise every background tab's stream freezes.

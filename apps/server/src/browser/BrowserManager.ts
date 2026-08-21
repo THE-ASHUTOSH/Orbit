@@ -122,7 +122,9 @@ export class BrowserManager extends EventEmitter {
       '--disable-features=CalculateNativeWinOcclusion',
       // We deliberately send high-rate input over CDP.
       '--disable-ipc-flooding-protection',
-      'about:blank',
+      // Chromium's initial page is adopted as the first tab, so start it on the
+      // configured home rather than about:blank.
+      config.homeUrl,
     ];
     // Only redirect shared memory to /tmp when /dev/shm is genuinely too small:
     // doing it unconditionally trades a 1GB purpose-built mount for a smaller

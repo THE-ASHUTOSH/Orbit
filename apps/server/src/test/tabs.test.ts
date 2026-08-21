@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeUrl } from '../browser/TabManager.js';
+import { normalizeUrl, resolveTabUrl } from '../browser/TabManager.js';
 
 test('urls: bare hostnames become https', () => {
   assert.equal(normalizeUrl('example.com'), 'https://example.com/');
@@ -34,4 +34,14 @@ test('urls: about:blank is the one non-http exception', () => {
 test('urls: empty input is rejected', () => {
   assert.equal(normalizeUrl(''), null);
   assert.equal(normalizeUrl('   '), null);
+});
+
+test('urls: a new tab falls back to the configured home page', () => {
+  assert.equal(resolveTabUrl(undefined, 'https://www.google.com'), 'https://www.google.com/');
+  assert.equal(resolveTabUrl(null, 'example.com'), 'https://example.com/', 'a bare home host is normalised');
+  assert.equal(resolveTabUrl('https://other.test/x', 'https://www.google.com'), 'https://other.test/x', 'explicit wins');
+  assert.equal(resolveTabUrl(undefined, 'about:blank'), 'about:blank', 'the offline default');
+  assert.equal(resolveTabUrl(undefined, ''), 'about:blank', 'empty home is not a navigation');
+  // A home page that is not a usable http(s) URL must not break tab creation.
+  assert.equal(resolveTabUrl(undefined, 'file:///etc/passwd'), 'about:blank');
 });

@@ -49,6 +49,13 @@ export const config = {
   downloadDir: process.env.DOWNLOAD_DIR || path.join(dataRoot, 'downloads'),
   uploadDir: process.env.UPLOAD_DIR || path.join(dataRoot, 'uploads'),
 
+  /**
+   * Page a new tab opens, and what the browser starts on. Kept as about:blank by
+   * default so a fresh deployment needs no Internet access at all; set it to a
+   * real URL (a search engine, an intranet dashboard) to get a home page.
+   */
+  homeUrl: process.env.HOME_URL || 'about:blank',
+
   chromiumPath: findChromium(),
   headless: bool(process.env.CHROMIUM_HEADLESS, true),
   cdpPort: int(process.env.CDP_PORT, 9222),

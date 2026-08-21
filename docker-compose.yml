@@ -55,6 +55,7 @@ services:
       # all tabs streaming concurrently - it just costs more CPU and memory.
       # See docs/performance.md#headed-vs-headless. Set true to go back.
       CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
+      HOME_URL: ${HOME_URL:-about:blank}
       CHROMIUM_TIMEZONE: ${CHROMIUM_TIMEZONE:-UTC}
       # Multicast does not cross a bridge network, so .local discovery only works
       # with network_mode: host (Linux). The IP always works either way.
