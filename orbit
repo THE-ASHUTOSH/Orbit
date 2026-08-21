@@ -216,6 +216,42 @@ WARNING
   fi
 }
 
+# Extensions are unpacked directories inside the container's data volume. This
+# accepts either a .zip or a local folder (which it zips first) and posts it to
+# the admin API, so there is no docker cp dance.
+cmd_ext() {
+  local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls)
+      curl -s "${LOCAL}/api/admin/extensions" -H "Cookie: $(login)" | pretty
+      ;;
+    add)
+      local src="${1:-}"
+      [ -n "$src" ] || die "usage: ./orbit ext add <folder-or-zip>"
+      [ -e "$src" ] || die "no such path: $src"
+      local zip="$src" tmp=""
+      if [ -d "$src" ]; then
+        command -v zip >/dev/null 2>&1 || die "the 'zip' command is needed to package a folder"
+        [ -f "$src/manifest.json" ] || die "$src has no manifest.json - point me at the unpacked extension"
+        tmp="$(mktemp -d)"; zip="${tmp}/$(basename "$src").zip"
+        # Zip the contents, not the wrapper folder.
+        (cd "$src" && zip -qr "$zip" .)
+        info "packaged $(basename "$src") ($(du -h "$zip" | cut -f1))"
+      fi
+      local name; name="$(basename "$zip")"
+      curl -s -X POST "${LOCAL}/api/admin/extensions/${name}" -H "Cookie: $(login)" --data-binary "@${zip}" | pretty
+      [ -n "$tmp" ] && rm -rf "$tmp"
+      info "installed - apply it with: ./orbit restart"
+      ;;
+    rm)
+      [ -n "${1:-}" ] || die "usage: ./orbit ext rm <id>   (ids from ./orbit ext ls)"
+      curl -s -X DELETE "${LOCAL}/api/admin/extensions/${1}" -H "Cookie: $(login)" | pretty
+      info "removed - apply it with: ./orbit restart"
+      ;;
+    *) die "usage: ./orbit ext [ls|add <folder-or-zip>|rm <id>]" ;;
+  esac
+}
+
 cmd_status() {
   docker compose ps
   echo
@@ -339,6 +375,7 @@ case "${1:-help}" in
   users)    shift; cmd_users "$@" ;;
   kick)     shift; cmd_kick "$@" ;;
   restart)  shift; cmd_restart "$@" ;;
+  ext)      shift; cmd_ext "$@" ;;
   test)     shift; npm test ;;
   bench)    shift; cmd_bench "$@" ;;
   dev)      shift; npm run dev ;;

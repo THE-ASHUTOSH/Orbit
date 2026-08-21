@@ -22,6 +22,7 @@ import { Toolbar } from './components/Toolbar';
 import { Viewport } from './components/Viewport';
 import { StatusBar } from './components/StatusBar';
 import { Admin } from './components/Admin';
+import { Downloads } from './components/Downloads';
 
 /** Height of the app's own chrome: tab bar + toolbar + status bar. */
 const CHROME_HEIGHT_PX = 104;
@@ -56,6 +57,8 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
   const [showAdmin, setShowAdmin] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [chooser, setChooser] = useState<{ tabId: string; multiple: boolean } | null>(null);
+  const [downloads, setDownloads] = useState<{ name: string; size: number; modified: number }[]>([]);
+  const [showDownloads, setShowDownloads] = useState(false);
   const activeRef = useRef<string | null>(null);
   activeRef.current = activeTabId;
 
@@ -159,7 +162,11 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
           setChooser({ tabId: msg.tabId, multiple: msg.multiple });
           break;
         case 'download':
-          if (msg.state === 'completed') setToast(`Download finished: ${msg.fileName || 'file'}`);
+          if (msg.state === 'completed') {
+            setToast(`Download finished: ${msg.fileName || 'file'} - open Downloads to save it`);
+            // The file is on the server now; refresh so it can be saved locally.
+            void api.downloads().then((r) => setDownloads(r.files)).catch(() => {});
+          }
           break;
         case 'clipboard.data':
           // Mirror the remote copy into the local clipboard when the browser
@@ -186,6 +193,12 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
   useEffect(() => {
     if (status === 'unauthorized') onSignedOut();
   }, [status, onSignedOut]);
+
+  useEffect(() => {
+    void api.downloads().then((r) => setDownloads(r.files)).catch(() => {});
+  }, []);
+
+  const refreshDownloads = () => void api.downloads().then((r) => setDownloads(r.files)).catch(() => {});
 
   // Keep the latency readout live even between messages.
   useEffect(() => {
@@ -255,6 +268,15 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
           <Splash message={state?.status === 'running' ? 'No tabs open. Press + to create one.' : 'Waiting for the browser…'} />
         )}
 
+        {showDownloads && (
+          <Downloads
+            files={downloads}
+            onClose={() => setShowDownloads(false)}
+            onRefresh={refreshDownloads}
+            onDelete={(name) => void api.deleteDownload(name).then(refreshDownloads)}
+          />
+        )}
+
         {showAdmin && state && (
           <Admin
             state={state}
@@ -292,6 +314,11 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
         users={state?.users ?? []}
         tabs={state?.tabs ?? []}
         browserStatus={state?.status ?? 'starting'}
+        downloadCount={downloads.length}
+        onToggleDownloads={() => {
+          setShowDownloads((v) => !v);
+          refreshDownloads();
+        }}
         isAdmin={self.role === 'admin'}
         onToggleAdmin={() => setShowAdmin((v) => !v)}
         onLogout={() => void api.logout().then(onSignedOut)}

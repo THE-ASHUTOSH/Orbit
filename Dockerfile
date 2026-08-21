@@ -48,6 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-noto-cjk \
       fonts-noto-color-emoji \
       ca-certificates \
+      unzip \
       tzdata \
  && rm -rf /var/lib/apt/lists/*
 
@@ -56,7 +57,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # trade-off and how to re-enable Chromium's sandbox with SYS_ADMIN).
 RUN groupadd --gid 10001 browser \
  && useradd --uid 10001 --gid browser --create-home --home-dir /home/browser browser \
- && mkdir -p /data/profile /data/downloads /data/uploads \
+ && mkdir -p /data/profile /data/downloads /data/uploads /data/extensions \
  && chown -R browser:browser /data /home/browser
 
 WORKDIR /app
@@ -79,6 +80,7 @@ ENV DISPLAY=:99 \
     CHROMIUM_DATA_DIR=/data/profile \
     DOWNLOAD_DIR=/data/downloads \
     UPLOAD_DIR=/data/uploads \
+    EXTENSIONS_DIR=/data/extensions \
     DATABASE_URL=file:/data/app.db \
     WEB_ROOT=/app/web \
     HOME=/home/browser

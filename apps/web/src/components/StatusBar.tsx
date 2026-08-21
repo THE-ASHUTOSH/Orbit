@@ -6,6 +6,8 @@ interface Props {
   users: UserInfo[];
   tabs: TabInfo[];
   browserStatus: string;
+  downloadCount: number;
+  onToggleDownloads: () => void;
   isAdmin: boolean;
   onToggleAdmin: () => void;
   onLogout: () => void;
@@ -29,6 +31,8 @@ export function StatusBar({
   users,
   tabs,
   browserStatus,
+  downloadCount,
+  onToggleDownloads,
   isAdmin,
   onToggleAdmin,
   onLogout,
@@ -128,6 +132,13 @@ export function StatusBar({
             aria-label={`Theme: ${theme}`}
           >
             {theme === 'dark' ? '🌙' : theme === 'light' ? '☀️' : '◐'}
+          </button>
+          <button
+            onClick={onToggleDownloads}
+            className="rounded px-2 py-0.5 hover:bg-elev"
+            title="Downloads - save files from the shared browser to this device"
+          >
+            downloads{downloadCount > 0 ? ` (${downloadCount})` : ''}
           </button>
           <button onClick={onToggleMetrics} className="rounded px-2 py-0.5 hover:bg-elev">
             {showMetrics ? 'hide' : 'metrics'}

@@ -4,7 +4,8 @@
  * interactive goes over the WebSocket.
  */
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
-import { createReadStream, readdirSync, statSync, createWriteStream, existsSync, unlinkSync } from 'node:fs';
+import { createReadStream, readdirSync, statSync, createWriteStream, existsSync, unlinkSync, mkdirSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
@@ -34,6 +35,7 @@ import {
 import { COOKIE_NAME, serializeCookie, sessionFromRequest } from '../auth/session.js';
 import { roleCan } from '../auth/permissions.js';
 import { isOriginAllowed } from './origin.js';
+import { listExtensions, removeExtension } from '../browser/extensions.js';
 import type { Runtime } from '../runtime.js';
 import type { Hub } from '../ws/hub.js';
 
@@ -299,6 +301,81 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
   app.get('/api/admin/audit', authed, adminOnly, (req, res) => {
     const limit = Number(req.query.limit ?? 100);
     res.json({ events: recentAudit(Number.isFinite(limit) ? limit : 100) });
+  });
+
+  // --- extensions ----------------------------------------------------------
+
+  app.get('/api/admin/extensions', authed, adminOnly, (_req, res) => {
+    if (!config.extensionsEnabled) return res.status(404).json({ error: 'disabled' });
+    res.json({
+      extensions: listExtensions().map((e) => ({
+        id: e.id,
+        name: e.name,
+        version: e.version,
+        manifestVersion: e.manifestVersion,
+        permissions: e.permissions,
+        sizeBytes: e.sizeBytes,
+      })),
+      // Chromium reads --load-extension once, at launch.
+      restartRequiredToApply: true,
+    });
+  });
+
+  /**
+   * Upload an extension as a .zip and unpack it. Unpacked extensions only - see
+   * browser/extensions.ts for why the Web Store is not an option here.
+   */
+  app.post('/api/admin/extensions/:name', authed, adminOnly, (req, res) => {
+    if (!config.extensionsEnabled) return res.status(404).json({ error: 'disabled' });
+    const id = safeName(param(req, 'name')).replace(/\.zip$/i, '') || `ext-${Date.now()}`;
+    const length = Number(req.headers['content-length'] ?? 0);
+    if (length > config.maxUploadBytes) return res.status(413).json({ error: 'too_large' });
+
+    mkdirSync(config.extensionsDir, { recursive: true });
+    const zipPath = path.join(config.extensionsDir, `${id}.upload.zip`);
+    const target = path.join(config.extensionsDir, id);
+    let written = 0;
+    req.on('data', (chunk: Buffer) => {
+      written += chunk.length;
+      if (written > config.maxUploadBytes) req.destroy();
+    });
+
+    void pipeline(req, createWriteStream(zipPath))
+      .then(() => {
+        rmSync(target, { recursive: true, force: true });
+        mkdirSync(target, { recursive: true });
+        // unzip rather than a zip library: it is one apt package, it handles the
+        // odd archive, and nothing here is on a hot path.
+        const out = spawnSync('unzip', ['-qq', '-o', zipPath, '-d', target], { timeout: 60_000 });
+        rmSync(zipPath, { force: true });
+        if (out.status !== 0) {
+          rmSync(target, { recursive: true, force: true });
+          const detail = (out.stderr?.toString() || out.error?.message || 'unzip failed').slice(0, 200);
+          log.warn('extension unpack failed', { id, detail });
+          return res.status(400).json({ error: 'unpack_failed', detail });
+        }
+        const found = listExtensions().find((e) => e.id === id);
+        if (!found) {
+          rmSync(target, { recursive: true, force: true });
+          return res.status(400).json({ error: 'no_manifest', detail: 'the archive has no manifest.json' });
+        }
+        audit('admin.extension.install', { userId: req.user!.id, detail: { id, name: found.name, version: found.version } });
+        log.warn('extension installed', { id, name: found.name, version: found.version });
+        res.status(201).json({ extension: found, restartRequiredToApply: true });
+      })
+      .catch((err) => {
+        rmSync(zipPath, { force: true });
+        log.warn('extension upload failed', { id, err: err as Error });
+        if (!res.headersSent) res.status(400).json({ error: 'upload_failed' });
+      });
+  });
+
+  app.delete('/api/admin/extensions/:name', authed, adminOnly, (req, res) => {
+    if (!config.extensionsEnabled) return res.status(404).json({ error: 'disabled' });
+    const id = param(req, 'name');
+    if (!removeExtension(id)) return res.status(404).json({ error: 'not_found' });
+    audit('admin.extension.remove', { userId: req.user!.id, detail: { id } });
+    res.json({ ok: true, restartRequiredToApply: true });
   });
 
   // --- tab permissions -----------------------------------------------------

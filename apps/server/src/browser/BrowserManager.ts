@@ -16,6 +16,7 @@ import { id } from '../ids.js';
 import { recordBrowserStart, recordBrowserStatus } from '../db.js';
 import { CdpConnection, discoverEndpoint, readActivePortEndpoint } from './cdp.js';
 import { clearStaleProfileLocks } from './profile.js';
+import { ensureExtensionsDir, extensionArgs } from './extensions.js';
 import type { BrowserStatus } from '@orbit/protocol';
 
 export interface BrowserManagerEvents {
@@ -129,6 +130,10 @@ export class BrowserManager extends EventEmitter {
     // Only redirect shared memory to /tmp when /dev/shm is genuinely too small:
     // doing it unconditionally trades a 1GB purpose-built mount for a smaller
     // shared one, and image-heavy pages then crash the renderer.
+    // Extensions are fixed at launch, so this is where they are picked up; the
+    // API tells admins a restart is needed after a change.
+    args.push(...extensionArgs());
+
     if (devShmTooSmall()) {
       log.warn('/dev/shm is small - redirecting Chromium shared memory to /tmp', { hint: 'raise shm_size' });
       args.push('--disable-dev-shm-usage');
@@ -164,6 +169,7 @@ export class BrowserManager extends EventEmitter {
     mkdirSync(config.profileDir, { recursive: true });
     mkdirSync(config.downloadDir, { recursive: true });
     mkdirSync(config.uploadDir, { recursive: true });
+    ensureExtensionsDir();
     this.clearProfileLocks();
     // A stale port file would point this process at a Chromium that is already
     // gone (or worse, someone else's).

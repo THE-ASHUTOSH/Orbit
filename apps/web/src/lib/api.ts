@@ -57,6 +57,25 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, 'upload_failed');
     return (await res.json()) as { name: string; size: number };
   },
+  deleteDownload: (name: string) =>
+    request<{ ok: boolean }>(`/api/downloads/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  extensions: () =>
+    request<{
+      extensions: { id: string; name: string; version: string; manifestVersion: number; permissions: string[]; sizeBytes: number }[];
+      restartRequiredToApply: boolean;
+    }>('/api/admin/extensions'),
+  installExtension: async (file: File) => {
+    const res = await fetch(`/api/admin/extensions/${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: file,
+    });
+    const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+    if (!res.ok) throw new ApiError(res.status, body.detail || body.error || 'install_failed');
+    return body;
+  },
+  removeExtension: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/extensions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   grant: (tabId: string, userId: string, permission: string) =>
     request<{ ok: boolean }>(`/api/tabs/${tabId}/grants/${userId}`, {
       method: 'PUT',

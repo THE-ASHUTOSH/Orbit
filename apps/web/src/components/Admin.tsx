@@ -19,9 +19,13 @@ export function Admin({ state, metrics, onClose, onCloseTab, onCreateTab }: Prop
   const [users, setUsers] = useState<(SelfUser & { lastSeenAt: number | null })[]>([]);
   const [cookies, setCookies] = useState<{ domain: string; count: number }[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [extensions, setExtensions] = useState<
+    { id: string; name: string; version: string; manifestVersion: number; permissions: string[]; sizeBytes: number }[]
+  >([]);
   const [form, setForm] = useState({ username: '', password: '', role: 'user' });
 
   const refresh = () => {
+    void api.extensions().then((r) => setExtensions(r.extensions)).catch(() => setExtensions([]));
     void api.users().then((r) => setUsers(r.users)).catch(() => setNotice('Could not load users.'));
     void api.cookies().then((r) => setCookies(r.domains.slice(0, 12))).catch(() => setCookies([]));
   };
@@ -150,6 +154,53 @@ export function Admin({ state, metrics, onClose, onCloseTab, onCreateTab }: Prop
           </select>
           <button className="rounded bg-sky-600 px-2 py-1 text-[11px] hover:bg-sky-500">add</button>
         </form>
+      </Section>
+
+      <Section title="Extensions">
+        <p className="text-[11px] text-ink-3">
+          Unpacked extensions, uploaded as a .zip. Chromium reads them at launch, so restart the browser to apply a
+          change.
+        </p>
+        <ul className="mt-2 space-y-1">
+          {extensions.map((e) => (
+            <li key={e.id} className="rounded border border-line px-2 py-1.5 text-[11px]">
+              <div className="flex items-center gap-2">
+                <span className="truncate font-medium">{e.name}</span>
+                <span className="text-ink-3">v{e.version}</span>
+                <span className="rounded bg-elev px-1">MV{e.manifestVersion}</span>
+                <button
+                  onClick={() =>
+                    void act(() => api.removeExtension(e.id), `Removed ${e.name}. Restart the browser to apply.`)
+                  }
+                  className="ml-auto text-ink-2 hover:text-red-400"
+                >
+                  remove
+                </button>
+              </div>
+              {e.permissions.length > 0 && (
+                <div className="mt-0.5 truncate text-ink-3" title={e.permissions.join(', ')}>
+                  wants: {e.permissions.slice(0, 6).join(', ')}
+                  {e.permissions.length > 6 ? ` +${e.permissions.length - 6}` : ''}
+                </div>
+              )}
+            </li>
+          ))}
+          {extensions.length === 0 && <li className="text-[11px] text-ink-3">none installed</li>}
+        </ul>
+        <label className="mt-2 block text-[11px] text-ink-2">
+          Install from .zip
+          <input
+            type="file"
+            accept=".zip,application/zip"
+            className="mt-1 block w-full text-[11px]"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              e.target.value = '';
+              void act(() => api.installExtension(file), 'Installed. Restart the browser to apply.');
+            }}
+          />
+        </label>
       </Section>
 
       <Section title="Shared browser state">

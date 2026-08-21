@@ -48,6 +48,9 @@ export const config = {
   profileDir: process.env.CHROMIUM_DATA_DIR || path.join(dataRoot, 'profile'),
   downloadDir: process.env.DOWNLOAD_DIR || path.join(dataRoot, 'downloads'),
   uploadDir: process.env.UPLOAD_DIR || path.join(dataRoot, 'uploads'),
+  /** Unpacked Chromium extensions live here, one directory each. */
+  extensionsDir: process.env.EXTENSIONS_DIR || path.join(dataRoot, 'extensions'),
+  extensionsEnabled: bool(process.env.EXTENSIONS_ENABLED, true),
 
   /**
    * Page a new tab opens, and what the browser starts on. Kept as about:blank by
