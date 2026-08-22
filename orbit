@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# orbit - one entry point for running the orbit.
+# orbit - one entry point for running Orbit, the shared LAN browser.
 #
 # Only wraps the things that are genuinely fiddly: first-run .env setup, waiting
 # for the container to be healthy, working out the LAN URL, the admin login
@@ -335,30 +335,34 @@ cmd_restore() {
 
 cmd_help() {
   cat <<'USAGE'
-orbit - orbit
+orbit - a shared Chromium for your LAN
 
-  ./orbit up                        build, start, wait for healthy, print the URL
-  ./orbit status                    container state, health, metrics, URLs
+  ./orbit up                        build, start, wait for healthy, print the URLs
+  ./orbit status                    container state, health, live metrics, URLs
   ./orbit url                       just the URLs to share
   ./orbit logs [lines]              follow the server log
+  ./orbit restart                   restart Chromium, keeping profile and logins
   ./orbit down [--wipe]             stop (--wipe also deletes all state)
-  ./orbit kill                      stop the container and kill every stray dev/test
-                                 process this project started (keeps your data)
-  ./orbit kill --purge              the whole project: container, data volume, image
-                                 and build output (asks for confirmation)
+  ./orbit kill                      stop, and kill stray dev/test processes
+  ./orbit kill --purge              also delete the volume, image and build output
 
   ./orbit user <name> [role]        create a user (prompts for the password)
-  ./orbit users                     list users
-  ./orbit kick <userId>             disconnect a user and kill their sessions
-  ./orbit restart                   restart Chromium, keeping the profile
+  ./orbit users                     list users and their ids
+  ./orbit kick <userId>             disconnect someone and kill their sessions
 
-  ./orbit test                      full test suite (needs local Chrome)
-  ./orbit bench [users] [tabs] [s]  latency/throughput benchmark
-                                 BASE_URL=http://<lan-ip>:3030 ./orbit bench  to include the network
-  ./orbit dev                       run from source without Docker
+  ./orbit ext ls                    list installed extensions
+  ./orbit ext add <folder|zip>      install an extension, then ./orbit restart
+  ./orbit ext rm <id>               uninstall one
 
-  ./orbit backup [file]             tar the data volume (stops the browser briefly)
+  ./orbit test                      full test suite (needs Chrome on this machine)
+  ./orbit bench [users] [tabs] [s]  latency and throughput benchmark
+  ./orbit dev                       run from source, without Docker
+
+  ./orbit backup [file]             tar the data volume (brief browser stop)
   ./orbit restore <file>            replace the data volume from a backup
+
+Include real network transit in the benchmark by pointing it at the LAN address:
+  BASE_URL=http://<lan-ip>:3030 ./orbit bench
 
 First run creates .env with a random SESSION_SECRET and an admin password you type.
 USAGE
