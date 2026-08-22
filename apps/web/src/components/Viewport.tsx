@@ -12,7 +12,7 @@
  * translated to remote-viewport coordinates and forwarded.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { modifiersFrom, type Cursor, type TabInfo } from '@orbit/protocol';
+import { modifiersFrom, nextZoom, type Cursor, type TabInfo } from '@orbit/protocol';
 import type { BrowserSocket } from '../lib/socket';
 
 interface Props {
@@ -21,6 +21,7 @@ interface Props {
   canControl: boolean;
   cursors: Cursor[];
   selfUserId: string;
+  onZoom: (zoom: number) => void;
 }
 
 /** Keys we keep for the local browser instead of forwarding. */
@@ -36,7 +37,7 @@ const hostOf = (url: string) => {
   }
 };
 
-export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props) {
+export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -48,6 +49,8 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
   const [density, setDensity] = useState(1);
   const densityRef = useRef(1);
   const [hasFrame, setHasFrame] = useState(false);
+  /** Size of the area the frame must fit inside. */
+  const [stage, setStage] = useState({ w: 0, h: 0 });
 
   // Frame pump: one decode in flight, newest frame wins.
   const pending = useRef<Uint8Array | null>(null);
@@ -97,27 +100,33 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
     });
   }, [socket, tab.tabId]);
 
-  // Track the on-screen size so pointer coordinates map back to the remote
-  // viewport regardless of how the frame is letterboxed.
+  // Measure the stage so the canvas can be capped in pixels.
   useEffect(() => {
-    const el = canvasRef.current;
+    const el = wrapRef.current;
     if (!el) return;
-    const measure = () => {
-      const rect = el.getBoundingClientRect();
-      // The page is frameSize/density CSS pixels wide, whatever the frame's own
-      // pixel count is, so pointer coordinates scale against that.
-      const pageWidth = frameSize.width / density;
-      if (rect.width > 0 && pageWidth > 0) setScale(rect.width / pageWidth);
-    };
+    const measure = () => setStage({ w: el.clientWidth, h: el.clientHeight });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    window.addEventListener('resize', measure);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [frameSize.width, density]);
+    return () => ro.disconnect();
+  }, []);
+
+  /**
+   * Fit the frame to the stage, preserving aspect: scale up when the frame is
+   * smaller than the stage (which is what zooming in produces) and down when it
+   * is larger. Computed rather than left to object-fit, because object-fit
+   * letterboxes inside the element and pointer coordinates would then no longer
+   * line up with the drawn image.
+   */
+  const display = useMemo(() => {
+    const pageW = frameSize.width / density;
+    const pageH = frameSize.height / density;
+    if (!stage.w || !stage.h || !pageW || !pageH) return { w: 0, h: 0, scale: 1 };
+    const fit = Math.min(stage.w / pageW, stage.h / pageH);
+    return { w: Math.round(pageW * fit), h: Math.round(pageH * fit), scale: fit };
+  }, [frameSize.width, frameSize.height, density, stage.w, stage.h]);
+
+  useEffect(() => setScale(display.scale), [display.scale]);
 
   const toRemote = useCallback(
     (clientX: number, clientY: number) => {
@@ -228,6 +237,13 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isDevtools(e)) return; // let the local browser have it
+    // Ctrl/Cmd +, - and 0 are zoom, the same as in any browser. Handled here
+    // rather than forwarded: a headless browser has no zoom UI to receive them.
+    if ((e.ctrlKey || e.metaKey) && ['=', '+', '-', '_', '0'].includes(e.key)) {
+      e.preventDefault();
+      if (canControl) onZoom(e.key === '0' ? 1 : nextZoom(tab.zoom ?? 1, e.key === '-' || e.key === '_' ? -1 : 1));
+      return;
+    }
     if (composing.current || e.nativeEvent.isComposing) return; // IME will commit via compositionend
     e.preventDefault();
     if (!canControl) return;
@@ -289,9 +305,11 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId }: Props
           ref={canvasRef}
           width={frameSize.width}
           height={frameSize.height}
-          className="viewport-surface block max-h-full max-w-full object-contain"
-          // Leaves room for the tab bar, toolbar and the single status bar.
-          style={{ maxHeight: 'calc(100vh - 6.5rem)' }}
+          // Sized by the stage it sits in, not by a hardcoded viewport maths.
+          className="viewport-surface block"
+          // Explicit fitted size: the element is exactly the drawn image, so
+          // clicks and cursor overlays share one coordinate space.
+          style={display.w ? { width: display.w, height: display.h } : { maxWidth: '100%', maxHeight: '100%' }}
         />
 
         {/* Transparent input catcher: keyboard, IME, paste, pointer, touch. */}

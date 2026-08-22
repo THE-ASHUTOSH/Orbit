@@ -109,6 +109,12 @@ export const config = {
   downloadsEnabled: bool(process.env.DOWNLOADS_ENABLED, true),
   uploadsEnabled: bool(process.env.UPLOADS_ENABLED, true),
   metricsEnabled: bool(process.env.METRICS_ENABLED, true),
+  /**
+   * Chrome DevTools for admins, proxied through this server. Off by default:
+   * it is a raw CDP channel to a page, which can run arbitrary JavaScript and
+   * read that page's cookies. See api/devtools.ts and docs/security.md.
+   */
+  devtoolsEnabled: bool(process.env.DEVTOOLS_ENABLED, false),
 
   mdnsEnabled: bool(process.env.MDNS_ENABLED, true),
   mdnsHostname: (process.env.MDNS_HOSTNAME || 'shared-browser').replace(/\.local$/, ''),

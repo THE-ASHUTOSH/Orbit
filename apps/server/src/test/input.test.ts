@@ -182,3 +182,21 @@ test('input: events for a closed tab are discarded, not dispatched', async () =>
   await settle();
   assert.equal(sent.length, 0);
 });
+
+test('input: the last actor on a tab is remembered, and expires', async () => {
+  const { input } = harness();
+  assert.equal(input.lastActor('tab_01A'), null, 'nobody has touched it yet');
+
+  input.submit(key('tab_01A', 'a'), 'user_A', 'conn_A');
+  input.submit(key('tab_01A', 'b'), 'user_B', 'conn_B');
+  await settle();
+  assert.equal(input.lastActor('tab_01A'), 'user_B', 'most recent wins');
+  assert.equal(input.lastActor('tab_01B'), null, 'tracked per tab');
+
+  // Attribution is only evidence while it is fresh: a popup opening minutes
+  // after anyone touched the opener should not be pinned on them.
+  assert.equal(input.lastActor('tab_01A', 0), null, 'expires outside the window');
+
+  input.dropTab('tab_01A');
+  assert.equal(input.lastActor('tab_01A'), null, 'forgotten when the tab closes');
+});

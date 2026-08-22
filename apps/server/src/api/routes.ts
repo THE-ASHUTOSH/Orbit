@@ -36,6 +36,7 @@ import { COOKIE_NAME, serializeCookie, sessionFromRequest } from '../auth/sessio
 import { roleCan } from '../auth/permissions.js';
 import { isOriginAllowed } from './origin.js';
 import { listExtensions, removeExtension } from '../browser/extensions.js';
+import { mountDevtools } from './devtools.js';
 import type { Runtime } from '../runtime.js';
 import type { Hub } from '../ws/hub.js';
 
@@ -469,6 +470,8 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
       })
       .catch(() => res.status(400).json({ error: 'upload_failed' }));
   });
+
+  mountDevtools(app, rt, authed, adminOnly);
 
   return app;
 }

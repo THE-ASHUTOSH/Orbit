@@ -57,6 +57,7 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, 'upload_failed');
     return (await res.json()) as { name: string; size: number };
   },
+  devtoolsUrl: (tabId: string) => request<{ url: string; targetId: string }>(`/api/tabs/${tabId}/devtools`),
   deleteDownload: (name: string) =>
     request<{ ok: boolean }>(`/api/downloads/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   extensions: () =>

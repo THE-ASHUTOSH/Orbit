@@ -21,10 +21,40 @@ Structural, not merely configured:
 - Chromium is a **child of the server process, in the same container**, so the
   only thing that can reach loopback is the server itself.
 - Port 9222 is not published, not in `EXPOSE`, and not on any Docker network.
-- No route, message type or admin action forwards a raw CDP command. The API
-  surface is the typed protocol; there is no passthrough.
+- No route or message type forwards a raw CDP command **except** the DevTools
+  proxy described below, which is disabled by default.
 - `CDP_PORT=0` is supported (OS-assigned port, discovered via the profile's
   `DevToolsActivePort`) so a fixed port cannot be squatted or guessed.
+
+## DevTools (`DEVTOOLS_ENABLED`, off by default)
+
+Chrome DevTools needs a real CDP channel, so this is the one feature that hands
+one to a client. Be clear-eyed about what it grants: whoever opens it can run
+arbitrary JavaScript in that page, read the page's cookies and storage, and see
+every request it makes. In a *shared* browser that means access to whatever
+accounts that page is signed into.
+
+It is therefore constrained on four axes:
+
+| | |
+|---|---|
+| **Disabled by default** | `DEVTOOLS_ENABLED=false`. With it off, both the frontend route and the socket return 403/404 - there is no path to reach it. |
+| **Admins only** | Checked on the HTTP route *and* again on the WebSocket upgrade, before a byte reaches Chromium. A `user` with control of a tab gets 403. |
+| **Page-scoped** | The proxy attaches to `/devtools/page/<targetId>`, never the browser endpoint. No `Target.*`, no `Browser.close`, no `Storage.getCookies` across every origin - one page only. The target id must belong to a tab this server tracks, so the parameter cannot be pointed elsewhere. |
+| **Audited** | Every open writes `devtools.open` to `audit_events` with the user and tab, and logs at warn level. |
+
+Chromium's debugging port still never leaves loopback: this server remains the
+only thing that talks to it. What changed is that an authenticated admin can
+borrow that channel for a single page, through an origin-checked, session-
+authenticated socket.
+
+The DevTools frontend is proxied from Chromium itself rather than vendored, so
+it always matches the browser version. It is served with its own CSP (it needs
+inline scripts and `eval`, which the application's own policy forbids) scoped to
+this origin only - the app's CSP is not loosened.
+
+**Recommendation:** leave it off unless you are debugging, and turn it off again
+afterwards. It is a debugging tool, not an operating mode.
 
 ## Authentication
 

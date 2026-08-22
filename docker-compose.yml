@@ -56,6 +56,7 @@ services:
       # See docs/performance.md#headed-vs-headless. Set true to go back.
       CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
       HOME_URL: ${HOME_URL:-about:blank}
+      DEVTOOLS_ENABLED: ${DEVTOOLS_ENABLED:-false}
       CHROMIUM_TIMEZONE: ${CHROMIUM_TIMEZONE:-UTC}
       # Multicast does not cross a bridge network, so .local discovery only works
       # with network_mode: host (Linux). The IP always works either way.

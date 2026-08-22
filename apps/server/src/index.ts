@@ -16,6 +16,7 @@ import { Runtime } from './runtime.js';
 import { Hub } from './ws/hub.js';
 import { buildApp } from './api/routes.js';
 import { MdnsResponder, lanAddress } from './mdns.js';
+import { handleDevtoolsUpgrade } from './api/devtools.js';
 
 function resolveWebRoot(): string | null {
   const candidates = [
@@ -65,7 +66,13 @@ export async function startServer(opts: { waitForBrowser?: boolean } = {}): Prom
 
   const server = http.createServer(app);
   server.keepAliveTimeout = 65_000;
-  hub.attachTo(server);
+  // One dispatcher: DevTools first, then the app socket, then a clean refusal.
+  server.on('upgrade', (req, socket, head) => {
+    if (handleDevtoolsUpgrade(rt, req, socket, head)) return;
+    if (hub.handleUpgrade(req, socket, head)) return;
+    socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+  });
 
   // Chromium comes up in parallel with the listener so the UI can render a
   // "browser starting" state instead of refusing connections.

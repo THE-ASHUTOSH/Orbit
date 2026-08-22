@@ -104,7 +104,12 @@ export class Hub {
 
   constructor(private readonly rt: Runtime) {
     this.rt.tabs.on('tab.created', (tab) => {
-      this.broadcast({ type: 'tab.created', tab: this.rt.tabInfo(tab) }, (c) => canViewTab(c.user, tab.tabId));
+      // Explicit creates carry their requester; a popup is attributed to whoever
+      // was last driving the tab that opened it.
+      const openedBy = tab.createdBy ?? (tab.openerTabId ? this.rt.input.lastActor(tab.openerTabId) : null);
+      this.broadcast({ type: 'tab.created', tab: this.rt.tabInfo(tab), openedBy }, (c) =>
+        canViewTab(c.user, tab.tabId),
+      );
     });
     this.rt.tabs.on('tab.closed', (tabId: string) => {
       this.rt.input.dropTab(tabId);
@@ -122,7 +127,12 @@ export class Hub {
         (c) => canViewTab(c.user, tab.tabId),
       ),
     );
-    this.rt.tabs.on('tab.resized', (tab) => void this.rt.streams.restart(tab.tabId));
+    this.rt.tabs.on('tab.resized', (tab) => {
+      void this.rt.streams.restart(tab.tabId);
+      // Without this the zoom readout only refreshes on the next unrelated tab
+      // event, so the number and the picture change at different moments.
+      this.broadcast({ type: 'tab.updated', tab: this.rt.tabInfo(tab) }, (c) => canViewTab(c.user, tab.tabId));
+    });
     this.rt.tabs.on('tab.crashed', (tab) => {
       // The renderer is new after a reload, so the old screencast is gone.
       setTimeout(() => void this.rt.streams.restart(tab.tabId), 1500);
@@ -158,8 +168,15 @@ export class Hub {
 
   // --- lifecycle -----------------------------------------------------------
 
-  attachTo(server: HttpServer): void {
-    server.on('upgrade', (req, socket, head) => this.onUpgrade(req, socket as Duplex, head));
+  /**
+   * Claim a websocket upgrade. Returns false, without touching the socket, when
+   * the path belongs to someone else - the DevTools proxy also handles upgrades,
+   * so exactly one handler must own each path.
+   */
+  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
+    if (!req.url?.startsWith('/ws')) return false;
+    this.onUpgrade(req, socket, head);
+    return true;
   }
 
   private onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
@@ -168,7 +185,6 @@ export class Hub {
       socket.write(`HTTP/1.1 ${code} ${code === 401 ? 'Unauthorized' : 'Forbidden'}\r\nConnection: close\r\n\r\n`);
       socket.destroy();
     };
-    if (!req.url?.startsWith('/ws')) return deny(403, 'unknown path');
     // Browsers do not enforce same-origin on WebSockets, so the server must.
     if (!isOriginAllowed(req.headers.origin, req.headers.host)) return deny(403, 'origin not allowed');
     if (this.shuttingDown) return deny(503 as 403, 'shutting down');
@@ -285,11 +301,21 @@ export class Hub {
         const tab = this.rt.tabs.require(msg.tabId);
         conn.subscriptions.add(msg.tabId);
         touchUser(conn.userId, msg.tabId);
+        const firstSubscriber = this.rt.streams.subscriberCount(msg.tabId) === 0;
         if (config.pinViewport) {
-          // Fixed size regardless of what any client asks for. resize() is a
-          // no-op when the tab is already that size, so this is cheap.
-          await this.rt.tabs.resize(msg.tabId, config.viewport.width, config.viewport.height);
-        } else if (this.rt.streams.subscriberCount(msg.tabId) === 0 && msg.width && msg.height) {
+          // Pinned resolution, but the viewer's aspect ratio: the width is fixed
+          // and the height follows the window, so nothing is letterboxed and no
+          // pixels are spent on black bars. Only the first subscriber sets the
+          // shape - later joiners must not reshape the tab under everyone else.
+          const aspect =
+            firstSubscriber && msg.width && msg.height
+              ? msg.height / msg.width
+              : config.viewport.height / config.viewport.width;
+          // Configured width, viewer's aspect. The window follows, so this can
+          // grow as well as shrink.
+          const width = config.viewport.width;
+          await this.rt.tabs.resize(msg.tabId, width, Math.round(width * aspect));
+        } else if (firstSubscriber && msg.width && msg.height) {
           // Otherwise the first subscriber decides, and later joiners scale the
           // frame locally rather than forcing a resize on everyone else.
           await this.rt.tabs.resize(msg.tabId, msg.width, msg.height);
@@ -322,7 +348,18 @@ export class Hub {
       case 'input.keyboard':
       case 'input.text':
       case 'input.touch': {
-        if (!canControlTab(conn.user, msg.tabId)) return conn.fail('forbidden', msg.tabId);
+        if (!canControlTab(conn.user, msg.tabId)) {
+          // Logged because "my clicks do nothing" is otherwise invisible: the
+          // client only sees a generic refusal.
+          log.debug('input denied', {
+            userId: conn.userId,
+            role: conn.user.role,
+            tabId: msg.tabId,
+            type: msg.type,
+            effective: effectivePermission(conn.user, msg.tabId),
+          });
+          return conn.fail('forbidden', msg.tabId);
+        }
         this.rt.tabs.require(msg.tabId);
         const accepted = this.rt.input.submit(msg, conn.userId, conn.id);
         if (!accepted) log.debug('duplicate input dropped', { userId: conn.userId, eventId: msg.eventId });
@@ -392,6 +429,13 @@ export class Hub {
       case 'tab.rename': {
         if (!canControlTab(conn.user, msg.tabId)) return conn.fail('forbidden', msg.tabId);
         this.rt.tabs.rename(msg.tabId, msg.label);
+        return;
+      }
+
+      case 'tab.zoom': {
+        if (!canControlTab(conn.user, msg.tabId)) return conn.fail('forbidden', msg.tabId);
+        // The viewport is shared, so this changes the view for everyone on the tab.
+        void this.rt.tabs.setZoom(msg.tabId, msg.zoom).catch((err) => this.failAsync(conn, err, msg.type, msg.tabId));
         return;
       }
 
@@ -470,6 +514,7 @@ export class Hub {
         downloads: config.downloadsEnabled,
         uploads: config.uploadsEnabled,
         webrtc: config.webrtcEnabled,
+        devtools: config.devtoolsEnabled,
       },
     };
   }

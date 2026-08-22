@@ -50,6 +50,8 @@ export class InputManager {
   private lastClientSeq = new Map<string, number>();
   /** Rolling window of receive->dispatch latencies for the metrics endpoint. */
   private dispatchLatencies: number[] = [];
+  /** Last user to send input to each tab, for attributing popups they opened. */
+  private lastActorByTab = new Map<string, { userId: string; at: number }>();
   private dropped = 0;
 
   constructor(
@@ -87,6 +89,7 @@ export class InputManager {
     if (last !== undefined && msg.clientSequence <= last && msg.clientSequence !== 0) return false;
     this.lastClientSeq.set(seqKey, msg.clientSequence);
 
+    this.lastActorByTab.set(msg.tabId, { userId, at: Date.now() });
     this.seenIds.add(msg.eventId);
     this.seenOrder.push(msg.eventId);
     if (this.seenOrder.length > DEDUP_WINDOW) {
@@ -248,7 +251,17 @@ export class InputManager {
     this.cdp().post('Input.insertText', { text }, tab.sessionId);
   }
 
+  /**
+   * Who was last interacting with a tab. Used to decide whose screen should
+   * follow a popup that tab opened - a click is the only evidence available.
+   */
+  lastActor(tabId: string, withinMs = 10_000): string | null {
+    const entry = this.lastActorByTab.get(tabId);
+    return entry && Date.now() - entry.at <= withinMs ? entry.userId : null;
+  }
+
   dropTab(tabId: string): void {
+    this.lastActorByTab.delete(tabId);
     this.queues.delete(tabId);
     this.sequence.delete(tabId);
     this.draining.delete(tabId);

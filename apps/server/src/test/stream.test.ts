@@ -14,6 +14,11 @@ class FakeCdp extends EventEmitter {
   sent: { method: string; sessionId?: string }[] = [];
   async send(method: string, _params?: unknown, sessionId?: string) {
     this.sent.push({ method, sessionId });
+    // captureScreenshot must answer with image data; returning {} made the
+    // keyframe path throw and log warnings that looked like real failures.
+    if (method === 'Page.captureScreenshot') {
+      return { data: Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString('base64') } as never;
+    }
     return {} as never;
   }
   post(method: string, _params?: unknown, sessionId?: string) {
@@ -64,9 +69,13 @@ test('stream: subscribing starts one screencast and frames reach the subscriber'
   await streams.subscribe('tab_01A', a);
 
   assert.ok(cdp.sent.some((s) => s.method === 'Page.startScreencast'));
+  // Subscribing delivers an immediate keyframe so a motionless page is not blank.
+  assert.equal(a.received.length, 1, 'keyframe on subscribe');
+  assert.ok(cdp.sent.some((s) => s.method === 'Page.captureScreenshot'));
+
   cdp.emit('Page.screencastFrame', frameEvent('sess-1'));
-  assert.equal(a.received.length, 1);
-  const decoded = decodeFrame(a.received[0]!.slice().buffer as ArrayBuffer);
+  assert.equal(a.received.length, 2, 'keyframe plus the screencast frame');
+  const decoded = decodeFrame(a.received[1]!.slice().buffer as ArrayBuffer);
   assert.equal(decoded?.header.tabId, 'tab_01A');
   assert.equal(decoded?.header.scrollY, 40);
   assert.equal(decoded?.image.length, 4);
@@ -91,9 +100,11 @@ test('stream: a backed-up client is skipped, a healthy one is not', async () => 
   await streams.subscribe('tab_01A', fast);
   await streams.subscribe('tab_01A', slow);
 
+  const fastBefore = fast.received.length; // keyframes from subscribing
+  const slowBefore = slow.received.length;
   for (let i = 0; i < 5; i++) cdp.emit('Page.screencastFrame', frameEvent('sess-1'));
-  assert.equal(fast.received.length, 5);
-  assert.equal(slow.received.length, 0, 'stale frames are dropped, never queued');
+  assert.equal(fast.received.length - fastBefore, 5);
+  assert.equal(slow.received.length - slowBefore, 0, 'stale frames are dropped, never queued');
   assert.ok(streams.rates().dropped >= 5);
 });
 

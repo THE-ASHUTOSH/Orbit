@@ -25,7 +25,8 @@ async function signIn(page: Page, username = USERNAME, password = PASSWORD) {
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Login' }).click();
-  await expect(page.getByRole('button', { name: 'logout' })).toBeVisible();
+  // The ⋮ menu only exists once signed in; sign-out lives inside it now.
+  await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
 }
 
 /**
@@ -140,6 +141,6 @@ test.describe('orbit UI', () => {
     await page.getByLabel('Password').fill('wrong-password');
     await page.getByRole('button', { name: 'Login' }).click();
     await expect(page.getByText('Incorrect username or password.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'logout' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Menu' })).toHaveCount(0);
   });
 });

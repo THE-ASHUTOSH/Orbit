@@ -21,6 +21,15 @@ if [ "${CHROMIUM_HEADLESS}" = "false" ]; then
     sleep 0.1
   done
   [ -e "/tmp/.X11-unix/X${DISPLAY#:}" ] || { echo "Xvfb failed to start" >&2; exit 1; }
+
+  # A window manager is required, not cosmetic: without one, X ignores the
+  # window resizes Chromium requests, so a tab's window stays the size it was
+  # created at. A headed renderer cannot exceed its window and anything smaller
+  # than the window arrives as black padding - so the viewport could never
+  # change. openbox is ~1MB and does nothing else.
+  echo "{\"level\":\"info\",\"msg\":\"starting window manager\"}"
+  openbox --sm-disable >/dev/null 2>&1 &
+  sleep 0.3
 fi
 
 exec "$@"

@@ -25,8 +25,15 @@ export interface Tab {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  /** Streamed viewport, i.e. base size divided by zoom. */
   width: number;
   height: number;
+  /** Tab whose page opened this one (window.open, target=_blank), if any. */
+  openerTabId: string | null;
+  /** Size zoom is applied to, so zooming is reversible without drift. */
+  baseWidth: number;
+  baseHeight: number;
+  zoom: number;
   createdAt: number;
   createdBy: string | null;
 }
@@ -113,6 +120,7 @@ export class TabManager extends EventEmitter {
       canGoForward: tab.canGoForward,
       width: tab.width,
       height: tab.height,
+      zoom: tab.zoom,
       createdAt: tab.createdAt,
       viewers,
     };
@@ -181,7 +189,13 @@ export class TabManager extends EventEmitter {
         continue;
       }
       const prior = previous.get(row.id);
-      if (prior) await this.resize(row.id, prior.width, prior.height).catch(() => {});
+      if (prior) {
+        // Restore the BASE size and the zoom separately. Passing the effective
+        // (already zoomed) size would fold the zoom into the base and compound
+        // it on every restart.
+        await this.resize(row.id, prior.baseWidth, prior.baseHeight).catch(() => {});
+        if (prior.zoom !== 1) await this.setZoom(row.id, prior.zoom).catch(() => {});
+      }
       // Put the page back where it was; a reused about:blank has no history.
       if (row.url && row.url !== 'about:blank' && tab.url !== row.url) {
         await this.cdp!.send('Page.navigate', { url: row.url }, tab.sessionId).catch((err) =>
@@ -197,8 +211,8 @@ export class TabManager extends EventEmitter {
         label: row.label,
         createdBy: row.created_by,
         reuseTabId: row.id,
-        width: previous.get(row.id)?.width,
-        height: previous.get(row.id)?.height,
+        width: previous.get(row.id)?.baseWidth,
+        height: previous.get(row.id)?.baseHeight,
       }).catch((err) => log.warn('tab restore failed', { tabId: row.id, err }));
     }
 
@@ -234,8 +248,11 @@ export class TabManager extends EventEmitter {
       : {
           url,
           newWindow: true,
-          width: opts.width ?? config.viewport.width,
-          height: opts.height ?? config.viewport.height,
+          // The window must match the viewport. Larger and the screencast
+          // captures the whole window surface, so the page occupies part of it
+          // and the rest arrives as black padding.
+          width: config.viewport.width,
+          height: config.viewport.height,
         };
     const creating = this.cdp
       .send<{ targetId: string }>('Target.createTarget', params)
@@ -331,6 +348,10 @@ export class TabManager extends EventEmitter {
       canGoForward: false,
       width: reserved?.width ?? config.viewport.width,
       height: reserved?.height ?? config.viewport.height,
+      openerTabId: targetInfo.openerId ? (this.byTarget.get(targetInfo.openerId) ?? null) : null,
+      baseWidth: reserved?.width ?? config.viewport.width,
+      baseHeight: reserved?.height ?? config.viewport.height,
+      zoom: 1,
       createdAt: Date.now(),
       createdBy: reserved?.createdBy ?? null,
     };
@@ -550,14 +571,67 @@ export class TabManager extends EventEmitter {
     return tab;
   }
 
+  /**
+   * Set the zoom for a tab: the viewport becomes the base size divided by the
+   * zoom, so content reflows larger (zoom in) or smaller (zoom out) while every
+   * frame stays natively rendered rather than scaled.
+   */
+  async setZoom(tabId: string, zoom: number): Promise<Tab> {
+    const tab = this.require(tabId);
+    tab.zoom = Math.min(4, Math.max(0.25, zoom));
+    return this.applyViewport(tab);
+  }
+
   /** Change the streamed viewport. Callers restart the screencast afterwards. */
   async resize(tabId: string, width: number, height: number): Promise<Tab> {
     const tab = this.require(tabId);
-    const w = Math.max(240, Math.min(width, config.viewport.maxWidth));
-    const h = Math.max(180, Math.min(height, config.viewport.maxHeight));
-    if (w === tab.width && h === tab.height) return tab;
+    tab.baseWidth = width;
+    tab.baseHeight = height;
+    return this.applyViewport(tab);
+  }
+
+  /** Push base/zoom to Chromium, clamped to the configured maximum. */
+  private async applyViewport(tab: Tab): Promise<Tab> {
+    const tabId = tab.tabId;
+    const width = Math.round(tab.baseWidth / tab.zoom);
+    const height = Math.round(tab.baseHeight / tab.zoom);
+    // Rounded to even numbers: an arbitrary zoom produces fractional sizes, and
+    // odd dimensions can leave a one-pixel seam (JPEG chroma is sampled in 2x2
+    // blocks) or be rounded by the window manager, which then no longer matches
+    // the viewport.
+    const even = (n: number) => n - (n % 2);
+    const w = even(Math.max(240, Math.min(width, config.viewport.maxWidth)));
+    const h = even(Math.max(180, Math.min(height, config.viewport.maxHeight)));
+    // Deliberately NOT recomputing zoom from the clamped size. Doing that fed a
+    // derived value back into the input it was derived from: a resize would
+    // re-read the clamped zoom, divide the new base by it, and the viewport would
+    // walk away from the display area on every window change.
+    if (w === tab.width && h === tab.height) {
+      // Zoom may have changed even when clamping keeps the size (already at the
+      // maximum), so clients still need the new value.
+      this.emit('tab.updated', tab);
+      return tab;
+    }
     tab.width = w;
     tab.height = h;
+
+    // Headed: resize the window to match. The screencast captures the window
+    // surface, so a viewport smaller than its window shows as black padding and
+    // a larger one is silently clamped - the two must stay equal.
+    if (!config.headless) {
+      try {
+        const { windowId } = await this.cdp!.send<{ windowId: number }>('Browser.getWindowForTarget', {
+          targetId: tab.targetId,
+        });
+        await this.cdp!.send('Browser.setWindowBounds', {
+          windowId,
+          bounds: { width: w, height: h, windowState: 'normal' },
+        });
+      } catch (err) {
+        log.debug('window resize failed; frame may be padded or clamped', { tabId, err: err as Error });
+      }
+    }
+
     await this.cdp!.send(
       'Emulation.setDeviceMetricsOverride',
       { width: w, height: h, deviceScaleFactor: config.deviceScaleFactor, mobile: false },

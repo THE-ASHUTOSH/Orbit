@@ -144,6 +144,20 @@ export const TabRenameMessage = z.object({
   tabId: TabId,
   label: z.string().max(120),
 });
+/**
+ * Zoom a tab. Implemented as a change of the remote viewport size rather than a
+ * CSS transform: shrinking the viewport makes content reflow larger and stay
+ * pixel-sharp, whereas CSS page zoom desynchronised input hit-testing from the
+ * rendered frame (measured - see docs/decisions.md).
+ *
+ * The viewport is shared, so zoom is shared by everyone on that tab.
+ */
+export const TabZoomMessage = z.object({
+  type: z.literal('tab.zoom'),
+  tabId: TabId,
+  zoom: z.number().min(0.25).max(4),
+});
+
 export const TabResizeMessage = z.object({
   type: z.literal('tab.resize'),
   tabId: TabId,
@@ -183,6 +197,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
   TabActionMessage,
   TabRenameMessage,
   TabResizeMessage,
+  TabZoomMessage,
   ClipboardWriteMessage,
   FileChooserRespondMessage,
   PingMessage,
@@ -209,6 +224,8 @@ export interface TabInfo {
   canGoForward: boolean;
   width: number;
   height: number;
+  /** Content magnification; the viewport is base size divided by this. */
+  zoom: number;
   createdAt: number;
   /** Users currently subscribed to this tab. */
   viewers: string[];
@@ -233,7 +250,7 @@ export interface BrowserState {
   tabs: TabInfo[];
   users: UserInfo[];
   limits: { maxTabs: number; maxUsers: number; maxFps: number };
-  features: { clipboard: boolean; downloads: boolean; uploads: boolean; webrtc: boolean };
+  features: { clipboard: boolean; downloads: boolean; uploads: boolean; webrtc: boolean; devtools: boolean };
 }
 
 export interface Cursor {
@@ -250,7 +267,16 @@ export type ServerMessage =
   | { type: 'hello'; protocolVersion: number; self: UserInfo; serverTime: number; state: BrowserState }
   | { type: 'state'; state: BrowserState }
   | { type: 'browser.status'; status: BrowserStatus; message?: string; restarts: number }
-  | { type: 'tab.created'; tab: TabInfo }
+  | {
+      type: 'tab.created';
+      tab: TabInfo;
+      /**
+       * User whose action opened this tab - the one who pressed +, or who
+       * clicked the link that spawned it. Only that client should follow it;
+       * everyone else stays where they are.
+       */
+      openedBy?: string | null;
+    }
   | { type: 'tab.closed'; tabId: string }
   | { type: 'tab.updated'; tab: TabInfo }
   | { type: 'tab.navigation'; tabId: string; url: string; title: string; loading: boolean }
@@ -446,6 +472,15 @@ export function userColor(userId: string): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return USER_COLORS[hash % USER_COLORS.length]!;
+}
+
+/** Zoom steps, matching what a browser's own zoom control offers. */
+export const ZOOM_STEPS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2] as const;
+
+/** Next step up or down from the current value. */
+export function nextZoom(current: number, direction: 1 | -1): number {
+  const i = ZOOM_STEPS.reduce((best, z, idx) => (Math.abs(z - current) < Math.abs(ZOOM_STEPS[best]! - current) ? idx : best), 0);
+  return ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, i + direction))]!;
 }
 
 export const ROLE_RANK: Record<Role, number> = { viewer: 0, user: 1, admin: 2 };

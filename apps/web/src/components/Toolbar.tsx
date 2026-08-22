@@ -4,11 +4,14 @@ import type { TabInfo } from '@orbit/protocol';
 interface Props {
   tab: TabInfo | null;
   canControl: boolean;
+  /** The ⋮ menu, rendered at the end of the bar. */
+  menu: React.ReactNode;
+  onResetZoom: () => void;
   onNavigate: (url: string) => void;
   onAction: (action: 'reload' | 'back' | 'forward' | 'stop' | 'duplicate') => void;
 }
 
-export function Toolbar({ tab, canControl, onNavigate, onAction }: Props) {
+export function Toolbar({ tab, canControl, menu, onResetZoom, onNavigate, onAction }: Props) {
   const [value, setValue] = useState(tab?.url ?? '');
   const [editing, setEditing] = useState(false);
 
@@ -59,9 +62,20 @@ export function Toolbar({ tab, canControl, onNavigate, onAction }: Props) {
         />
       </form>
 
-      <ToolButton label="Duplicate tab" disabled={disabled} onClick={() => onAction('duplicate')}>
-        ⧉
-      </ToolButton>
+      {/* Only present when zoom is not 100%, the way a browser surfaces it -
+          and clicking it puts you back to 100%. */}
+      {tab && Math.round((tab.zoom ?? 1) * 100) !== 100 && (
+        <button
+          onClick={onResetZoom}
+          disabled={!canControl}
+          title={`Zoom ${Math.round((tab.zoom ?? 1) * 100)}% - click to reset to 100%`}
+          className="shrink-0 rounded border border-line-2 px-1.5 py-0.5 text-[11px] tabular-nums text-ink-2 hover:bg-elev disabled:opacity-40"
+        >
+          {Math.round((tab.zoom ?? 1) * 100)}%
+        </button>
+      )}
+
+      {menu}
     </div>
   );
 }

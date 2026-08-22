@@ -43,6 +43,7 @@ FROM node:24-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
       xvfb \
+      openbox \
       fonts-liberation \
       fonts-noto-core \
       fonts-noto-cjk \

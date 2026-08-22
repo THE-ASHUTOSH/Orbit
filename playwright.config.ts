@@ -17,6 +17,9 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 20_000 },
   fullyParallel: false,
+  // One at a time: these drive one shared browser, and parallel workers contend
+  // for its tabs and CPU rather than testing anything real.
+  workers: 1,
   reporter: [['list']],
   use: {
     baseURL: process.env.BASE_URL ?? 'http://127.0.0.1:3030',

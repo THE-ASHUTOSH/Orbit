@@ -58,6 +58,17 @@ export class BrowserManager extends EventEmitter {
   private shuttingDown = false;
   private restartTimer: NodeJS.Timeout | null = null;
   private starting: Promise<void> | null = null;
+  /** http://127.0.0.1:<port> for the live CDP endpoint, or null when down. */
+  private httpBase: string | null = null;
+
+  /**
+   * Loopback base URL of Chromium's DevTools HTTP server. Derived from the
+   * resolved websocket endpoint, so it is correct even when CDP_PORT is 0 and
+   * the port was assigned by the OS.
+   */
+  get cdpHttpBase(): string | null {
+    return this.isReady ? this.httpBase : null;
+  }
 
   get status(): BrowserStatus {
     return this._status;
@@ -207,6 +218,12 @@ export class BrowserManager extends EventEmitter {
     // reason about, but 0 is what makes concurrent instances safe.
     const endpoint =
       config.cdpPort === 0 ? await readActivePortEndpoint(config.profileDir) : await discoverEndpoint(config.cdpPort);
+    try {
+      const parsed = new URL(endpoint);
+      this.httpBase = `http://${parsed.host}`;
+    } catch {
+      this.httpBase = null;
+    }
     const conn = new CdpConnection(endpoint);
     await conn.connect();
     this.cdpConn = conn;

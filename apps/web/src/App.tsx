@@ -23,9 +23,8 @@ import { Viewport } from './components/Viewport';
 import { StatusBar } from './components/StatusBar';
 import { Admin } from './components/Admin';
 import { Downloads } from './components/Downloads';
-
-/** Height of the app's own chrome: tab bar + toolbar + status bar. */
-const CHROME_HEIGHT_PX = 104;
+import { Menu } from './components/Menu';
+import { useTheme } from './lib/theme';
 
 export function App() {
   const [self, setSelf] = useState<SelfUser | null>(null);
@@ -55,6 +54,7 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
   const [showMetrics, setShowMetrics] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const { theme, cycle: cycleTheme } = useTheme();
   const [toast, setToast] = useState<string | null>(null);
   const [chooser, setChooser] = useState<{ tabId: string; multiple: boolean } | null>(null);
   const [downloads, setDownloads] = useState<{ name: string; size: number; modified: number }[]>([]);
@@ -64,19 +64,28 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
 
   // --- socket wiring -------------------------------------------------------
 
+  /**
+   * The area actually available for the frame, which the server uses as the
+   * stream's aspect ratio. Measured from the element rather than derived from
+   * window height minus a guessed chrome height: a guess that is a few pixels
+   * out makes the frame slightly the wrong shape, which then shows up as either
+   * black bars or a cropped edge.
+   */
+  const stageRef = useRef<HTMLElement | null>(null);
+  const viewportArea = useCallback(() => {
+    const el = stageRef.current;
+    const width = el?.clientWidth || window.innerWidth;
+    const height = el?.clientHeight || window.innerHeight - 104;
+    return { width: Math.max(320, Math.round(width)), height: Math.max(240, Math.round(height)) };
+  }, []);
+
   const subscribe = useCallback(
     (tabId: string) => {
-      socket.send({
-        type: 'tab.subscribe',
-        tabId,
-        // Ask for a stream that matches this screen; the server clamps it and
-        // the first subscriber's size wins for everyone on that tab.
-        width: Math.min(1920, Math.round(window.innerWidth * (window.devicePixelRatio > 1 ? 1 : 1))),
-        // tab bar + toolbar + the single status bar.
-        height: Math.min(1080, Math.round(window.innerHeight - CHROME_HEIGHT_PX)),
-      });
+      // The server keeps the configured resolution but takes the aspect ratio
+      // from here, so the frame fills the window instead of being letterboxed.
+      socket.send({ type: 'tab.subscribe', tabId, ...viewportArea() });
     },
-    [socket],
+    [socket, viewportArea],
   );
 
   useEffect(() => {
@@ -108,10 +117,13 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
           break;
         case 'tab.created':
           setState((s) => (s ? { ...s, tabs: [...s.tabs.filter((t) => t.tabId !== msg.tab.tabId), msg.tab] } : s));
-          // A popup opened by the page becomes a real tab; follow it if we have
-          // nothing selected, otherwise leave the user where they are.
           setActiveTabId((cur) => {
-            if (cur) return cur;
+            // Follow the new tab only if this user caused it - pressed +, or
+            // clicked the link that opened it. Everyone else stays put, which is
+            // the whole point of a per-person view onto a shared browser.
+            const mine = msg.openedBy && msg.openedBy === self.userId;
+            if (cur && !mine) return cur;
+            if (cur && mine) socket.send({ type: 'tab.unsubscribe', tabId: cur });
             subscribe(msg.tab.tabId);
             return msg.tab.tabId;
           });
@@ -194,6 +206,45 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
     if (status === 'unauthorized') onSignedOut();
   }, [status, onSignedOut]);
 
+  /**
+   * Keep the stream's shape matching the stage.
+   *
+   * An observer rather than a window 'resize' listener: the first subscribe
+   * happens before the chrome has finished laying out, so the initial
+   * measurement is a little too tall and the frame comes back the wrong shape.
+   * Watching the element corrects that as soon as it settles, and covers window
+   * resizes for free.
+   *
+   * Only while nobody else is on the tab - the viewport is shared, and reshaping
+   * it under someone else mid-sentence would be rude.
+   */
+  const lastSent = useRef({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    let timer = 0;
+    const sync = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const tab = state?.tabs.find((t) => t.tabId === activeRef.current);
+        if (!tab || tab.viewers.length > 1) return;
+        const area = viewportArea();
+        // Ignore sub-pixel churn so this cannot oscillate.
+        if (Math.abs(area.width - lastSent.current.width) < 8 && Math.abs(area.height - lastSent.current.height) < 8)
+          return;
+        lastSent.current = area;
+        socket.send({ type: 'tab.resize', tabId: tab.tabId, ...area });
+      }, 350);
+    };
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    sync();
+    return () => {
+      window.clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [socket, state?.tabs, viewportArea]);
+
   useEffect(() => {
     void api.downloads().then((r) => setDownloads(r.files)).catch(() => {});
   }, []);
@@ -253,14 +304,49 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
         canControl={canControl}
         onNavigate={(url) => activeTabId && socket.send({ type: 'tab.navigate', tabId: activeTabId, url })}
         onAction={(action) => activeTabId && socket.send({ type: 'tab.action', tabId: activeTabId, action })}
+        onResetZoom={() => activeTabId && socket.send({ type: 'tab.zoom', tabId: activeTabId, zoom: 1 })}
+        menu={
+          <Menu
+            zoom={activeTab?.zoom ?? 1}
+            viewWidth={activeTab?.width ?? 0}
+            viewHeight={activeTab?.height ?? 0}
+            canControl={canControl}
+            onZoom={(zoom) => activeTabId && socket.send({ type: 'tab.zoom', tabId: activeTabId, zoom })}
+            downloadCount={downloads.length}
+            onOpenDownloads={() => {
+              setShowDownloads(true);
+              refreshDownloads();
+            }}
+            canInspect={self.role === 'admin' && (state?.features.devtools ?? false)}
+            onInspect={() => {
+              if (!activeTabId) return;
+              // The server decides the URL: the client never learns the CDP port
+              // or the target id until it is allowed to.
+              void api
+                .devtoolsUrl(activeTabId)
+                .then((r) => window.open(r.url, '_blank', 'noopener'))
+                .catch(() => setToast('DevTools is not enabled on this server.'));
+            }}
+            isAdmin={self.role === 'admin'}
+            onOpenAdmin={() => setShowAdmin(true)}
+            theme={theme}
+            onCycleTheme={cycleTheme}
+            showMetrics={showMetrics}
+            onToggleMetrics={() => setShowMetrics((v) => !v)}
+            onNewTab={() => socket.send({ type: 'tab.create' })}
+            onDuplicateTab={() => activeTabId && socket.send({ type: 'tab.action', tabId: activeTabId, action: 'duplicate' })}
+            onLogout={() => void api.logout().then(onSignedOut)}
+          />
+        }
       />
 
-      <main className="relative min-h-0 flex-1">
+      <main ref={stageRef} className="relative min-h-0 flex-1">
         {activeTab ? (
           <Viewport
             socket={socket}
             tab={activeTab}
             canControl={canControl}
+            onZoom={(zoom) => activeTabId && socket.send({ type: 'tab.zoom', tabId: activeTabId, zoom })}
             cursors={cursors[activeTab.tabId] ?? []}
             selfUserId={self.userId}
           />
@@ -314,20 +400,11 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
         users={state?.users ?? []}
         tabs={state?.tabs ?? []}
         browserStatus={state?.status ?? 'starting'}
-        downloadCount={downloads.length}
-        onToggleDownloads={() => {
-          setShowDownloads((v) => !v);
-          refreshDownloads();
-        }}
-        isAdmin={self.role === 'admin'}
-        onToggleAdmin={() => setShowAdmin((v) => !v)}
-        onLogout={() => void api.logout().then(onSignedOut)}
         selfUserId={self.userId}
         status={status}
         latency={latency}
         metrics={metrics}
         showMetrics={showMetrics}
-        onToggleMetrics={() => setShowMetrics((v) => !v)}
       />
     </div>
   );
