@@ -243,12 +243,27 @@ cmd_ext() {
       [ -n "$tmp" ] && rm -rf "$tmp"
       info "installed - apply it with: ./orbit restart"
       ;;
+    store)
+      local ref="${1:-}"
+      [ -n "$ref" ] || die "usage: ./orbit ext store <web-store-url-or-id>"
+      # The server does the fetching: it knows the running Chromium's version,
+      # which the update service wants, and it owns the extensions directory.
+      local body
+      body="$(curl -s -X POST "${LOCAL}/api/admin/extensions/store" -H "Cookie: $(login)" \
+        -H 'Content-Type: application/json' --data "{\"id\":\"${ref}\"}")"
+      printf '%s' "$body" | pretty
+      # Only claim success when the server actually returned an extension.
+      case "$body" in
+        *'"extension"'*) info "installed - apply it with: ./orbit restart" ;;
+        *) die "install failed" ;;
+      esac
+      ;;
     rm)
       [ -n "${1:-}" ] || die "usage: ./orbit ext rm <id>   (ids from ./orbit ext ls)"
       curl -s -X DELETE "${LOCAL}/api/admin/extensions/${1}" -H "Cookie: $(login)" | pretty
       info "removed - apply it with: ./orbit restart"
       ;;
-    *) die "usage: ./orbit ext [ls|add <folder-or-zip>|rm <id>]" ;;
+    *) die "usage: ./orbit ext [ls|store <url-or-id>|add <folder-or-zip>|rm <id>]" ;;
   esac
 }
 
@@ -351,6 +366,7 @@ orbit - a shared Chromium for your LAN
   ./orbit kick <userId>             disconnect someone and kill their sessions
 
   ./orbit ext ls                    list installed extensions
+  ./orbit ext store <url|id>        install from the Chrome Web Store
   ./orbit ext add <folder|zip>      install an extension, then ./orbit restart
   ./orbit ext rm <id>               uninstall one
 

@@ -22,6 +22,10 @@ interface Props {
   cursors: Cursor[];
   selfUserId: string;
   onZoom: (zoom: number) => void;
+  /** Returns true when the shortcut was handled locally and must not be forwarded. */
+  onShortcut: (action: string) => boolean;
+  /** Page coordinates for the probe, screen coordinates for placement. */
+  onContextMenu: (pageX: number, pageY: number, screenX: number, screenY: number) => void;
 }
 
 /** Keys we keep for the local browser instead of forwarding. */
@@ -37,7 +41,7 @@ const hostOf = (url: string) => {
   }
 };
 
-export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom }: Props) {
+export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom, onShortcut, onContextMenu }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -174,6 +178,16 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom 
   const mouseButton = (button: number) =>
     button === 1 ? 'middle' : button === 2 ? 'right' : button === 3 ? 'back' : button === 4 ? 'forward' : 'left';
 
+  /**
+   * Keyboard focus follows the tab: after a keyboard tab switch or Alt+T,
+   * typing must reach the new page without clicking it first. Skipped while a
+   * form field has focus, so editing the address bar is never interrupted.
+   */
+  useEffect(() => {
+    if (document.activeElement instanceof HTMLInputElement) return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [tab.tabId]);
+
   const onPointerDown = (e: React.PointerEvent) => {
     inputRef.current?.focus({ preventScroll: true });
     if (!canControl || e.pointerType === 'touch') return;
@@ -239,6 +253,32 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom 
     if (isDevtools(e)) return; // let the local browser have it
     // Ctrl/Cmd +, - and 0 are zoom, the same as in any browser. Handled here
     // rather than forwarded: a headless browser has no zoom UI to receive them.
+    /**
+     * Orbit's own shortcuts use Alt/Option, not Ctrl/Cmd.
+     *
+     * Ctrl+T, Ctrl+W, Ctrl+L and friends are reserved by the browser Orbit is
+     * running in and cannot be intercepted from a page - mapping them would, at
+     * best, do nothing and, in the case of Ctrl+W, close the user's real tab.
+     */
+    if (e.altKey && !e.ctrlKey && !e.metaKey) {
+      const key = e.key.toLowerCase();
+      const action =
+        key === 't' ? (e.shiftKey ? 'reopenTab' : 'newTab')
+        : key === 'w' ? 'closeTab'
+        : key === 'd' ? 'focusAddress'
+        : key === 'arrowleft' ? 'back'
+        : key === 'arrowright' ? 'forward'
+        : /^[1-9]$/.test(key) ? `selectTab:${key}`
+        : null;
+      if (action && onShortcut(action)) {
+        e.preventDefault();
+        return;
+      }
+    }
+    if ((e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) && onShortcut('reload')) {
+      e.preventDefault();
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && ['=', '+', '-', '_', '0'].includes(e.key)) {
       e.preventDefault();
       if (canControl) onZoom(e.key === '0' ? 1 : nextZoom(tab.zoom ?? 1, e.key === '-' || e.key === '_' ? -1 : 1));
@@ -326,7 +366,11 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom 
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
           onPointerLeave={() => socket.send({ type: 'cursor', tabId: tab.tabId, x: -1, y: -1, active: false })}
-          onContextMenu={(e) => e.preventDefault()}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            const p = toRemote(e.clientX, e.clientY);
+            onContextMenu(p.x, p.y, e.clientX, e.clientY);
+          }}
           onKeyDown={onKeyDown}
           onKeyUp={onKeyUp}
           onCompositionStart={() => {

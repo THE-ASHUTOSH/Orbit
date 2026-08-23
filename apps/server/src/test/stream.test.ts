@@ -132,3 +132,38 @@ test('stream: viewers are reported per tab', async () => {
   assert.equal(streams.subscriberCount('tab_01A'), 1);
   assert.deepEqual(streams.viewers('tab_01OTHER'), []);
 });
+
+test('stream: a screencast that is refused while the page is still attaching is retried', async () => {
+  /**
+   * The real failure this covers: straight after a browser restart Chromium
+   * answers Page.startScreencast with "Not attached to an active page", and
+   * without a retry that subscriber sat there receiving nothing.
+   */
+  class FlakyCdp extends FakeCdp {
+    refusals = 2;
+    override async send(method: string, params?: unknown, sessionId?: string) {
+      if (method === 'Page.startScreencast' && this.refusals > 0) {
+        this.refusals--;
+        this.sent.push({ method: 'Page.startScreencast(refused)', sessionId });
+        throw new Error('Not attached to an active page');
+      }
+      return super.send(method, params, sessionId);
+    }
+  }
+
+  const cdp = new FlakyCdp();
+  const { manager } = fakeTabs();
+  const streams = new StreamManager(manager);
+  streams.attach(cdp as never);
+  const a = sink('a');
+  await streams.subscribe('tab_01A', a);
+
+  await new Promise((r) => setTimeout(r, 1200));
+  assert.equal(cdp.sent.filter((s) => s.method === 'Page.startScreencast').length, 1, 'the retry succeeded');
+  assert.equal(cdp.refusals, 0, 'both refusals were seen');
+
+  // And the stream really is live: a frame from Chromium reaches the subscriber.
+  cdp.emit('event', frameEvent('sess-1'));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(a.received.length >= 1, 'frames flow after the retry');
+});

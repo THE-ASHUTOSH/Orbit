@@ -24,7 +24,7 @@ import {
 import { config } from '../config.js';
 import { log } from '../log.js';
 import { id } from '../ids.js';
-import { audit, getUser, touchUser, userColorIndex, type UserRow } from '../db.js';
+import { audit, getUser, lastClosedTab, recordVisit, touchUser, userColorIndex, type UserRow } from '../db.js';
 import { sessionFromRequest } from '../auth/session.js';
 import { canAdminTab, canControlTab, canViewTab, effectivePermission, roleCan } from '../auth/permissions.js';
 import { isOriginAllowed } from '../api/origin.js';
@@ -98,6 +98,8 @@ export class Hub {
   /** userId -> when their last connection dropped, for the "reconnecting" state. */
   private recentlyGone = new Map<string, number>();
   private cursors = new Map<string, Map<string, Cursor>>();
+  /** Last URL recorded in history per tab, to avoid counting one load twice. */
+  private lastRecordedUrl = new Map<string, string>();
   private cursorDirty = new Set<string>();
   private timers: NodeJS.Timeout[] = [];
   private shuttingDown = false;
@@ -115,18 +117,26 @@ export class Hub {
       this.rt.input.dropTab(tabId);
       void this.rt.streams.stop(tabId, 'tab closed');
       this.cursors.delete(tabId);
+      this.lastRecordedUrl.delete(tabId);
       for (const c of this.connections.values()) c.subscriptions.delete(tabId);
       this.broadcast({ type: 'tab.closed', tabId });
     });
     this.rt.tabs.on('tab.updated', (tab) =>
       this.broadcast({ type: 'tab.updated', tab: this.rt.tabInfo(tab) }, (c) => canViewTab(c.user, tab.tabId)),
     );
-    this.rt.tabs.on('tab.navigation', (tab) =>
+    this.rt.tabs.on('tab.navigation', (tab) => {
+      // History: one entry per URL, recorded when a tab actually lands somewhere
+      // new. Guarded per tab so the several navigation events a single page load
+      // produces do not each count as a visit.
+      if (tab.url && this.lastRecordedUrl.get(tab.tabId) !== tab.url && !tab.loading) {
+        this.lastRecordedUrl.set(tab.tabId, tab.url);
+        recordVisit(tab.url, tab.title);
+      }
       this.broadcast(
         { type: 'tab.navigation', tabId: tab.tabId, url: tab.url, title: tab.title, loading: tab.loading },
         (c) => canViewTab(c.user, tab.tabId),
-      ),
-    );
+      );
+    });
     this.rt.tabs.on('tab.resized', (tab) => {
       void this.rt.streams.restart(tab.tabId);
       // Without this the zoom readout only refreshes on the next unrelated tab
@@ -429,6 +439,25 @@ export class Hub {
       case 'tab.rename': {
         if (!canControlTab(conn.user, msg.tabId)) return conn.fail('forbidden', msg.tabId);
         this.rt.tabs.rename(msg.tabId, msg.label);
+        return;
+      }
+
+      case 'tab.reopen': {
+        if (!roleCan(conn.user.role, 'tab.create')) return conn.fail('forbidden');
+        const closed = lastClosedTab();
+        if (!closed) return;
+        void this.rt.tabs
+          .createTab({ url: closed.url, label: closed.label, createdBy: conn.userId })
+          .catch((err) => this.failAsync(conn, err, msg.type));
+        return;
+      }
+
+      case 'context.probe': {
+        if (!canViewTab(conn.user, msg.tabId)) return conn.fail('forbidden', msg.tabId);
+        void this.rt
+          .probeContext(msg.tabId, msg.x, msg.y)
+          .then((info) => conn.send({ type: 'context.info', tabId: msg.tabId, ...info }))
+          .catch(() => conn.send({ type: 'context.info', tabId: msg.tabId, link: null, image: null, selection: '' }));
         return;
       }
 

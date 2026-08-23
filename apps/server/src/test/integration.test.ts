@@ -398,6 +398,28 @@ test('orbit: end to end', async (t) => {
     assert.ok(cursors.cursors.some((c) => c.displayName === 'admin'));
   });
 
+  await t.test('a right-click probe reports what is under the pointer, and paste reaches the page', async () => {
+    // The context menu is built from this: Chromium's own menu is a native
+    // popup and can never appear in a screencast.
+    alice.send({ type: 'context.probe', tabId: tab1.tabId, x: 100, y: 150 });
+    const onLink = await alice.waitForMessage('context.info', (m) => m.tabId === tab1.tabId);
+    assert.match(onLink.link ?? '', /id=popup/, 'the anchor under the pointer was found');
+
+    alice.send({ type: 'context.probe', tabId: tab1.tabId, x: 700, y: 500 });
+    const onNothing = await alice.waitForMessage('context.info', (m) => m.tabId === tab1.tabId && m.link === null);
+    assert.equal(onNothing.image, null, 'empty space reports no link and no image');
+
+    // Paste: the client reads its own clipboard and sends the text, which is
+    // inserted into the focused field of the real page.
+    // On tab 2, so the caret this leaves behind cannot affect the later tests
+    // that assert on tab 1's field.
+    typed.clear();
+    await bob.click(tab2.tabId, 120, 60);
+    bob.send({ type: 'clipboard.write', tabId: tab2.tabId, text: 'pasted-from-a-viewer' });
+    const value = await waitFor('pasted text', () => typed.get('two-b')?.includes('pasted') && typed.get('two-b'));
+    assert.ok(value.includes('pasted-from-a-viewer'), `pasted text arrived intact: ${value}`);
+  });
+
   // --- authorization -------------------------------------------------------
 
   await t.test('a viewer can watch but its input is refused server-side', async () => {

@@ -27,6 +27,10 @@ interface Props {
   onCycleTheme: () => void;
   showMetrics: boolean;
   onToggleMetrics: () => void;
+  bookmarkCount: number;
+  onOpenBookmarks: () => void;
+  onOpenHistory: () => void;
+  onOpenExtensions: () => void;
   onNewTab: () => void;
   onDuplicateTab: () => void;
   onLogout: () => void;
@@ -48,6 +52,10 @@ export function Menu({
   onCycleTheme,
   showMetrics,
   onToggleMetrics,
+  bookmarkCount,
+  onOpenBookmarks,
+  onOpenHistory,
+  onOpenExtensions,
   onNewTab,
   onDuplicateTab,
   onLogout,
@@ -107,10 +115,14 @@ export function Menu({
           </Item>
 
           <Divider />
+          <Item onClick={run(onOpenBookmarks)} hint={bookmarkCount > 0 ? String(bookmarkCount) : undefined}>
+            Bookmarks
+          </Item>
+          <Item onClick={run(onOpenHistory)}>History</Item>
           <Item onClick={run(onOpenDownloads)} hint={downloadCount > 0 ? String(downloadCount) : undefined}>
             Downloads
           </Item>
-          {isAdmin && <Item onClick={run(onOpenAdmin)}>Extensions</Item>}
+          <Item onClick={run(onOpenExtensions)}>Extensions</Item>
           {canInspect && <Item onClick={run(onInspect)}>Inspect (DevTools)</Item>}
 
           <Divider />

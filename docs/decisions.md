@@ -282,3 +282,73 @@ The schema is small enough that the migration is mechanical (see
 still marked experimental in Node 24 - it emits a warning, the API has been
 stable in practice, and the entire surface used is `exec`/`prepare`/`run`/`get`/
 `all`, which is trivial to port to `better-sqlite3` if that changes.
+
+---
+
+## 8. Browser-shaped UI inside a browser tab
+
+**Problem.** Orbit is displayed inside a real browser, and three things a normal
+browser does are not available to a page: the keyboard shortcuts, the right-click
+menu, and an extension's popup window.
+
+**Options considered.** Map the familiar chords anyway and hope; render a fake
+menu with no knowledge of the page; or accept the constraint and pick mechanisms
+that actually work through a stream.
+
+**Chosen:**
+
+- **Shortcuts on Alt/Option.** `Ctrl+T`, `Ctrl+W`, `Ctrl+L`, `Ctrl+Tab` and
+  `Ctrl+1…9` are reserved by the host browser and are not cancellable from a
+  page. Mapping them would do nothing - except `Ctrl+W`, which would close the
+  user's own tab. So Orbit uses `Alt+T/W/D`, `Alt+Shift+T`, `Alt+1…9` and
+  `Alt+←/→`, which are cancellable, plus `F5`/`Ctrl+R` for reload and `Ctrl+±/0`
+  for zoom (already intercepted for the remote viewport).
+- **A server-answered context menu.** On right-click the client sends
+  `context.probe` with the page coordinate; the server runs one
+  `elementFromPoint` evaluation and replies with the link, image and selection
+  under the pointer (`context.info`). The menu is then built from facts about the
+  real page, not guesses. Chromium's own menu is a native popup outside the
+  page's compositor surface - it can never appear in a screencast, no matter how
+  the capture is done.
+- **Extension pages as tabs.** An extension popup is likewise a native window.
+  The page behind it is ordinary HTML at `chrome-extension://<id>/…`, so the
+  extensions panel opens it as a tab. The id is derived the way Chromium derives
+  it (SHA-256 of the manifest key, or of the load path for an unpacked
+  extension, in the a-p alphabet), and the client only ever sends an extension
+  id - the URL is built server-side, because `chrome-extension://` is otherwise
+  a scheme no client may navigate to.
+
+**Tradeoffs.** The shortcuts are not the ones muscle memory expects, which is
+why they are listed in the README and in the menu. Copy from the page uses the
+selection the probe already reported rather than a synthetic `Ctrl+C`, and paste
+depends on the *viewer's* browser granting clipboard read - a prompt Orbit cannot
+answer for it. An extension that draws its popup as a native panel with no page
+behind it has nothing to open, and the panel says so ("no page").
+
+---
+
+## 9. Installing extensions from the Chrome Web Store
+
+**Problem.** Chromium only takes unpacked extensions at launch, but almost
+everything a user wants is published on the Web Store, and asking an admin to
+find a zip elsewhere is a poor answer.
+
+**Options considered.** Zip upload only; drive the store UI inside the shared
+browser (it refuses to install without the store's own flow, which needs a
+signed-in Google profile and a browser restart to take effect anyway); or fetch
+the `.crx` from the same update service every Chrome install talks to.
+
+**Chosen:** fetch the `.crx` by id, strip the wrapper, unpack the zip that is
+inside it - the same unpack path an uploaded zip takes.
+
+**Why.** It makes the common case one paste, and it is the only route that gets
+the actual published artefact without a Google account in the shared profile.
+
+**What this is not.** The signature is not verified and there is no auto-update:
+the trust boundary is the admin, exactly as with an uploaded zip. Installs are
+admin-only, audited, and the panel lists every permission the manifest requests -
+which matters, because an extension in the shared browser can see everyone's
+sessions. The unpacked copy also gets a path-derived id rather than its store id
+(the store id lives in the signed header we discard), so an extension that
+hardcodes its own id - OAuth redirect URIs, mostly - can misbehave. Those are the
+cases where the zip route, or not installing it at all, is the right call.

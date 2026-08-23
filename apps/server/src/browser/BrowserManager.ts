@@ -97,6 +97,14 @@ export class BrowserManager extends EventEmitter {
     if (!this.cdpConn?.connected) throw new Error('browser_unavailable');
     return this.cdpConn;
   }
+  /** e.g. "Chrome/151.0.7922.137", as reported by the running browser. */
+  product = '';
+
+  /** Just the version, for anything that has to speak to Google's services. */
+  get chromeVersion(): string {
+    return /([\d.]+)/.exec(this.product)?.[1] ?? '120.0.0.0';
+  }
+
   get isReady(): boolean {
     return this._status === 'running' && !!this.cdpConn?.connected;
   }
@@ -246,6 +254,7 @@ export class BrowserManager extends EventEmitter {
     }
 
     const version = await conn.send<{ product: string }>('Browser.getVersion');
+    this.product = version.product;
     this.startedAt = Date.now();
     this.consecutiveFailures = 0;
     recordBrowserStart(this.browserId);

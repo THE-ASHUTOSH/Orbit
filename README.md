@@ -85,11 +85,20 @@ Everything runs through one script. `./orbit help` prints this list.
 | Command | What it does |
 |---|---|
 | `./orbit ext ls` | list installed extensions |
+| `./orbit ext store <url\|id>` | install from the Chrome Web Store |
 | `./orbit ext add <folder\|zip>` | install an unpacked extension (zips a folder for you) |
 | `./orbit ext rm <id>` | uninstall one |
 
 Chromium reads extensions only at launch, so follow any change with
 `./orbit restart`.
+
+```bash
+./orbit ext store https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh
+./orbit restart
+```
+
+Same thing from the app: **⋮ → Extensions**, paste the store URL, Install. That
+panel is also where anyone opens an extension's popup or options page.
 
 ### Development and testing
 
@@ -156,9 +165,43 @@ tab is a login in every tab.
 hashing, so no two people ever share a dot. The bar shows who is online and
 **which page each of them is on**; the tab bar shows who is on each tab.
 
-**Extensions.** Unpacked Chromium extensions from the admin panel or
-`./orbit ext add`. The panel lists the permissions each one requests, which
-matters when an extension can see everybody's sessions.
+**Bookmarks and history, shared.** A star in the toolbar, a bookmarks panel, and
+a history panel with search. The address bar suggests from both, ranked by visit
+count then recency. Shared like everything else here: a link one person saves is
+a link everyone has. History records what people actually navigated to (not
+redirects mid-load), and only an admin can clear it.
+
+**Its own right-click menu.** Chromium's context menu is a native popup outside
+any page's compositor surface, so it can never appear in a stream. Orbit asks the
+server what is under the pointer and builds the menu from the answer: open a link
+or image in a new tab, copy a link or image address, back/forward/reload, copy,
+paste, select all.
+
+**Keyboard shortcuts** — on Alt/Option, deliberately. `Ctrl+T`, `Ctrl+W` and
+`Ctrl+L` belong to the browser Orbit is displayed *in* and cannot be intercepted
+from a page; mapping them would, at best, do nothing and, in `Ctrl+W`'s case,
+close your own tab.
+
+| Shortcut | Action |
+| --- | --- |
+| `Alt+T` | New tab |
+| `Alt+Shift+T` | Reopen the tab you just closed |
+| `Alt+W` | Close tab |
+| `Alt+D` | Focus the address bar |
+| `Alt+1`…`Alt+8` / `Alt+9` | Nth tab / last tab |
+| `Alt+←` / `Alt+→` | Back / forward |
+| `F5`, `Ctrl+R` | Reload |
+| `Ctrl+±`, `Ctrl+0` | Zoom in/out, reset |
+
+**Extensions.** An extensions panel in the ⋮ menu lists what is installed and
+opens an extension's popup or options page. Admins install by pasting a **Chrome
+Web Store** URL or id — Orbit fetches the `.crx` from Google's update service,
+unwraps it and unpacks it — or by uploading a `.zip` (`./orbit ext add`) for
+anything not on the store. Extension pages open as tabs, because an extension
+popup is a native window that a screencast cannot see. Nothing is
+signature-verified: an extension runs in the shared browser with the permissions
+its manifest asks for, so installs are admin-only, audited, and the panel lists
+those permissions.
 
 **Downloads to your own machine.** Files the shared browser downloads are listed
 in the app with a Save button that streams them to the device you are sitting at.
@@ -319,14 +362,17 @@ About 9,000 lines of TypeScript and 1,800 lines of documentation.
 
 ## Tests
 
-`./orbit test` runs **76 tests**, including an integration suite against a real
+`./orbit test` runs **90 tests**, including an integration suite against a real
 Chromium:
 
 - **unit** — scrypt hashing and timing, session cookie signing and tampering, the
   role/grant permission matrix, the key map (Enter, Backspace, arrows, Ctrl+A,
   punctuation, numpad), URL scheme blocking, home-page resolution, frame codec
   round trip, mDNS packet encode/parse, stale profile-lock clearing, colour
-  assignment never repeating, stream backpressure and keyframes.
+  assignment never repeating, stream backpressure and keyframes, bookmark and
+  history upserts (visits accumulate, an empty title never erases a known one,
+  suggestions ranked by visits then recency, `%` matched literally), extension id
+  derivation, and `.crx` unwrapping (CRX2, CRX3, a truncated header refused).
 - **arbiter** — input never crosses tabs, three users on one tab are serialised in
   arrival order, duplicate `eventId` and replayed `clientSequence` are dropped,
   per-connection sequence spaces, coordinate clamping, IME/touch/wheel dispatch.
@@ -337,19 +383,26 @@ Chromium:
   received; a third user joining the same tab and interleaving keystrokes with
   none lost; a viewer's input refused server-side; per-tab grants enforced;
   popups adopted; SPA title changes reported; cookies shared across the profile;
+  a right-click probe finding the real anchor under the pointer (and nothing in
+  empty space); a paste arriving in the page's focused field;
   one user disconnecting while another keeps working; reconnect restoring the
   previous tab; malformed and over-rate messages rejected; **`SIGKILL` on
   Chromium recovered with tab ids preserved and input working again**; graceful
   shutdown notifying clients.
 
 `npm run test:e2e` additionally drives the UI in a real browser with Playwright
-(two independent contexts standing in for two machines). It is opt-in because
-Playwright downloads browser binaries:
+(two independent contexts standing in for two machines): sign-in, streaming and
+live pixels, tab create/switch/close, bookmarking a page and finding it in the
+panel, address-bar suggestions from history, the right-click menu, and
+`Alt+T`/`Alt+W`. It is opt-in because Playwright downloads browser binaries:
 
 ```bash
 npm i -D @playwright/test && npx playwright install chromium
 ADMIN_PASSWORD=... npm run test:e2e
 ```
+
+Logins are rate-limited to 10 a minute per IP, and one full run signs in nine
+times - two runs inside the same minute will hit that limit, not a bug.
 
 The integration suite launches a real browser, so it is timing-sensitive: under
 heavy CPU load a frame-timing assertion can occasionally flake. Re-run with

@@ -178,6 +178,20 @@ export const FileChooserRespondMessage = z.object({
   files: z.array(z.string().max(255)).max(10),
 });
 
+/** Reopen the most recently closed tab, like Ctrl+Shift+T. */
+export const TabReopenMessage = z.object({ type: z.literal('tab.reopen') });
+
+/**
+ * Ask what is under the pointer so a context menu can offer the right items.
+ * Answered with `context.info`.
+ */
+export const ContextProbeMessage = z.object({
+  type: z.literal('context.probe'),
+  tabId: TabId,
+  x: z.number().finite(),
+  y: z.number().finite(),
+});
+
 export const PingMessage = z.object({
   type: z.literal('ping'),
   t: z.number().nonnegative().optional(),
@@ -198,6 +212,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   TabRenameMessage,
   TabResizeMessage,
   TabZoomMessage,
+  TabReopenMessage,
+  ContextProbeMessage,
   ClipboardWriteMessage,
   FileChooserRespondMessage,
   PingMessage,
@@ -287,6 +303,16 @@ export type ServerMessage =
   | { type: 'stream.stopped'; tabId: string; reason: string }
   | { type: 'input.ack'; eventId: string; tabId: string; serverReceiveTime: number; dispatchedAt: number; queueDepth: number }
   | { type: 'clipboard.data'; tabId: string; text: string }
+  | {
+      type: 'context.info';
+      tabId: string;
+      /** Link under the pointer, if any - enables "open in new tab". */
+      link: string | null;
+      /** Image under the pointer, if any. */
+      image: string | null;
+      /** Current selection, so Copy can be offered only when it would do something. */
+      selection: string;
+    }
   | { type: 'file.chooser'; tabId: string; multiple: boolean; accept: string[] }
   | { type: 'download'; tabId: string | null; state: 'started' | 'progress' | 'completed' | 'canceled'; guid: string; fileName: string; received?: number; total?: number }
   | { type: 'metrics'; metrics: ServerMetrics }

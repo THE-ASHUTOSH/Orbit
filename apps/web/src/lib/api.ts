@@ -7,6 +7,20 @@ export interface SelfUser {
   lastTabId: string | null;
 }
 
+export interface Bookmark {
+  id: string;
+  url: string;
+  title: string;
+  created_at: number;
+  created_by: string | null;
+}
+
+export interface Suggestion {
+  kind: 'bookmark' | 'history';
+  url: string;
+  title: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -57,9 +71,36 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, 'upload_failed');
     return (await res.json()) as { name: string; size: number };
   },
+  bookmarks: () => request<{ bookmarks: Bookmark[] }>('/api/bookmarks'),
+  addBookmark: (url: string, title: string) =>
+    request<{ bookmark: Bookmark }>('/api/bookmarks', { method: 'POST', body: JSON.stringify({ url, title }) }),
+  removeBookmark: (id: string) => request<{ ok: boolean }>(`/api/bookmarks/${id}`, { method: 'DELETE' }),
+  history: (q = '') =>
+    request<{ history: { url: string; title: string; at: number; visits: number }[] }>(
+      `/api/history${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+    ),
+  clearHistory: () => request<{ ok: boolean }>('/api/history', { method: 'DELETE' }),
+  suggest: (q: string) =>
+    request<{ suggestions: Suggestion[] }>(`/api/suggest?q=${encodeURIComponent(q)}`),
   devtoolsUrl: (tabId: string) => request<{ url: string; targetId: string }>(`/api/tabs/${tabId}/devtools`),
   deleteDownload: (name: string) =>
     request<{ ok: boolean }>(`/api/downloads/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  /** The installed extensions, as anyone signed in may see them. */
+  installedExtensions: () =>
+    request<{ extensions: { id: string; name: string; version: string; hasPopup: boolean; hasOptions: boolean }[] }>(
+      '/api/extensions',
+    ),
+  openExtension: (id: string, page: 'popup' | 'options') =>
+    request<{ ok: boolean }>(
+      `/api/extensions/${encodeURIComponent(id)}/open${page === 'options' ? '?page=options' : ''}`,
+      { method: 'POST' },
+    ),
+  /** Install from the Chrome Web Store, by store URL or bare extension id. */
+  installFromStore: (id: string) =>
+    request<{ extension: { id: string; name: string; version: string }; restartRequiredToApply: boolean }>(
+      '/api/admin/extensions/store',
+      { method: 'POST', body: JSON.stringify({ id }) },
+    ),
   extensions: () =>
     request<{
       extensions: { id: string; name: string; version: string; manifestVersion: number; permissions: string[]; sizeBytes: number }[];

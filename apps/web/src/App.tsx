@@ -14,7 +14,7 @@ import {
   type ServerMessage,
   type TabPermission,
 } from '@orbit/protocol';
-import { api, type SelfUser } from './lib/api';
+import { api, type Bookmark, type SelfUser } from './lib/api';
 import { BrowserSocket, type ConnectionStatus, type LatencySample } from './lib/socket';
 import { Login } from './components/Login';
 import { TabBar } from './components/TabBar';
@@ -24,6 +24,9 @@ import { StatusBar } from './components/StatusBar';
 import { Admin } from './components/Admin';
 import { Downloads } from './components/Downloads';
 import { Menu } from './components/Menu';
+import { BookmarksPanel, HistoryPanel } from './components/BookmarksPanel';
+import { ContextMenu, type ContextTarget } from './components/ContextMenu';
+import { ExtensionsPanel } from './components/ExtensionsPanel';
 import { useTheme } from './lib/theme';
 
 export function App() {
@@ -59,6 +62,16 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
   const [chooser, setChooser] = useState<{ tabId: string; multiple: boolean } | null>(null);
   const [downloads, setDownloads] = useState<{ name: string; size: number; modified: number }[]>([]);
   const [showDownloads, setShowDownloads] = useState(false);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [history, setHistory] = useState<{ url: string; title: string; at: number; visits: number }[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showExtensions, setShowExtensions] = useState(false);
+  /** Set when the server answers a right-click probe. */
+  const [context, setContext] = useState<ContextTarget | null>(null);
+  /** Where the pending right-click happened on screen, for menu placement. */
+  const contextAt = useRef({ x: 0, y: 0 });
+  const addressRef = useRef<HTMLInputElement>(null);
   const activeRef = useRef<string | null>(null);
   activeRef.current = activeTabId;
 
@@ -180,6 +193,15 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
             void api.downloads().then((r) => setDownloads(r.files)).catch(() => {});
           }
           break;
+        case 'context.info':
+          setContext({
+            x: contextAt.current.x,
+            y: contextAt.current.y,
+            link: msg.link,
+            image: msg.image,
+            selection: msg.selection,
+          });
+          break;
         case 'clipboard.data':
           // Mirror the remote copy into the local clipboard when the browser
           // allows it; silently ignore when permission is denied.
@@ -249,6 +271,12 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
     void api.downloads().then((r) => setDownloads(r.files)).catch(() => {});
   }, []);
 
+  const refreshBookmarks = useCallback(
+    () => void api.bookmarks().then((r) => setBookmarks(r.bookmarks)).catch(() => {}),
+    [],
+  );
+  useEffect(refreshBookmarks, [refreshBookmarks]);
+
   const refreshDownloads = () => void api.downloads().then((r) => setDownloads(r.files)).catch(() => {});
 
   // Keep the latency readout live even between messages.
@@ -278,6 +306,77 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
   const canControl = self.role !== 'viewer' && (permission === 'control' || permission === 'admin');
   const canCreate = self.role !== 'viewer';
 
+  const navigate = (url: string) => {
+    if (activeTabId) socket.send({ type: 'tab.navigate', tabId: activeTabId, url });
+  };
+  const bookmarked = !!activeTab && bookmarks.some((b) => b.url === activeTab.url);
+  const toggleBookmark = () => {
+    if (!activeTab) return;
+    const existing = bookmarks.find((b) => b.url === activeTab.url);
+    const done = existing ? api.removeBookmark(existing.id) : api.addBookmark(activeTab.url, activeTab.title);
+    void done.then(refreshBookmarks).catch(() => setToast('Could not save the bookmark.'));
+  };
+
+  /**
+   * Send a modifier chord to the page. The remote Chromium handles the editing
+   * command itself, the way it would for a local keypress.
+   *
+   * 2 is Ctrl in the wire bitmask, and that is right whatever the viewer's OS
+   * is: the browser receiving it is the Linux one in the container.
+   */
+  const chord = (key: string, code: string, modifiers: number) => {
+    if (!activeTabId || !canControl) return;
+    for (const event of ['keydown', 'keyup'] as const)
+      socket.sendInput({ type: 'input.keyboard', event, tabId: activeTabId, key, code, location: 0, repeat: false, modifiers });
+  };
+
+  /**
+   * Orbit's own shortcuts, on Alt/Option.
+   *
+   * Ctrl/Cmd chords (T, W, L, Tab, 1-9) belong to the browser Orbit is displayed
+   * in and cannot be captured from a page - Ctrl+W would close the user's real
+   * tab, not the remote one. Returning true means the key was consumed here.
+   */
+  const onShortcut = (action: string): boolean => {
+    const numbered = /^selectTab:(\d)$/.exec(action);
+    if (numbered) {
+      const tabs = state?.tabs ?? [];
+      const index = Number(numbered[1]) === 9 ? tabs.length - 1 : Number(numbered[1]) - 1;
+      const target = tabs[index];
+      if (target) selectTab(target.tabId);
+      return !!target;
+    }
+    switch (action) {
+      case 'newTab':
+        if (!canCreate) return false;
+        socket.send({ type: 'tab.create' });
+        return true;
+      case 'closeTab':
+        // No permission check here: closing is the server's call (it allows a
+        // tab's owner and anyone whose role may close tabs), and a tab created a
+        // moment ago has not been granted control yet.
+        if (!activeTabId) return false;
+        socket.send({ type: 'tab.close', tabId: activeTabId });
+        return true;
+      case 'reopenTab':
+        if (!canCreate) return false;
+        socket.send({ type: 'tab.reopen' });
+        return true;
+      case 'focusAddress':
+        addressRef.current?.focus();
+        addressRef.current?.select();
+        return true;
+      case 'back':
+      case 'forward':
+      case 'reload':
+        if (!activeTabId || !canControl) return false;
+        socket.send({ type: 'tab.action', tabId: activeTabId, action });
+        return true;
+      default:
+        return false;
+    }
+  };
+
   // Auto-attach to a tab when ours closes or the first one appears.
   useEffect(() => {
     if (activeTabId || !state?.tabs.length) return;
@@ -300,9 +399,12 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
       />
 
       <Toolbar
+        ref={addressRef}
         tab={activeTab}
         canControl={canControl}
-        onNavigate={(url) => activeTabId && socket.send({ type: 'tab.navigate', tabId: activeTabId, url })}
+        bookmarked={bookmarked}
+        onToggleBookmark={toggleBookmark}
+        onNavigate={navigate}
         onAction={(action) => activeTabId && socket.send({ type: 'tab.action', tabId: activeTabId, action })}
         onResetZoom={() => activeTabId && socket.send({ type: 'tab.zoom', tabId: activeTabId, zoom: 1 })}
         menu={
@@ -333,6 +435,16 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
             onCycleTheme={cycleTheme}
             showMetrics={showMetrics}
             onToggleMetrics={() => setShowMetrics((v) => !v)}
+            bookmarkCount={bookmarks.length}
+            onOpenBookmarks={() => {
+              setShowBookmarks(true);
+              refreshBookmarks();
+            }}
+            onOpenHistory={() => {
+              setShowHistory(true);
+              void api.history().then((r) => setHistory(r.history)).catch(() => {});
+            }}
+            onOpenExtensions={() => setShowExtensions(true)}
             onNewTab={() => socket.send({ type: 'tab.create' })}
             onDuplicateTab={() => activeTabId && socket.send({ type: 'tab.action', tabId: activeTabId, action: 'duplicate' })}
             onLogout={() => void api.logout().then(onSignedOut)}
@@ -349,9 +461,81 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
             onZoom={(zoom) => activeTabId && socket.send({ type: 'tab.zoom', tabId: activeTabId, zoom })}
             cursors={cursors[activeTab.tabId] ?? []}
             selfUserId={self.userId}
+            onShortcut={onShortcut}
+            onContextMenu={(pageX, pageY, screenX, screenY) => {
+              contextAt.current = { x: screenX, y: screenY };
+              socket.send({ type: 'context.probe', tabId: activeTab.tabId, x: pageX, y: pageY });
+            }}
           />
         ) : (
           <Splash message={state?.status === 'running' ? 'No tabs open. Press + to create one.' : 'Waiting for the browser…'} />
+        )}
+
+        {context && activeTab && (
+          <ContextMenu
+            target={context}
+            canControl={canControl}
+            canGoBack={activeTab.canGoBack}
+            canGoForward={activeTab.canGoForward}
+            onClose={() => setContext(null)}
+            onAction={(action) => socket.send({ type: 'tab.action', tabId: activeTab.tabId, action })}
+            onOpenLink={(url) => socket.send({ type: 'tab.create', url })}
+            onCopyText={(text) => void navigator.clipboard?.writeText(text).catch(() => {})}
+            onPageCopy={() => {
+              // Both halves on purpose: the chord puts the selection on the
+              // remote clipboard so an in-page paste works, and the probe
+              // already told us the text, so put it on this machine's clipboard
+              // directly rather than waiting for the page to report a copy.
+              chord('c', 'KeyC', 2);
+              if (context.selection) void navigator.clipboard?.writeText(context.selection).catch(() => {});
+            }}
+            onPaste={() =>
+              void navigator.clipboard
+                ?.readText()
+                .then((text) => text && socket.send({ type: 'clipboard.write', tabId: activeTab.tabId, text }))
+                .catch(() => setToast('Your browser did not allow reading the clipboard.'))
+            }
+            onSelectAll={() => chord('a', 'KeyA', 2)}
+          />
+        )}
+
+        {showBookmarks && (
+          <BookmarksPanel
+            bookmarks={bookmarks}
+            onClose={() => setShowBookmarks(false)}
+            onOpen={(url) => {
+              navigate(url);
+              setShowBookmarks(false);
+            }}
+            onRemove={(id) => void api.removeBookmark(id).then(refreshBookmarks).catch(() => {})}
+          />
+        )}
+
+        {showHistory && (
+          <HistoryPanel
+            entries={history}
+            onClose={() => setShowHistory(false)}
+            onOpen={(url) => {
+              navigate(url);
+              setShowHistory(false);
+            }}
+            onSearch={(q) => void api.history(q).then((r) => setHistory(r.history)).catch(() => {})}
+            canClear={self.role === 'admin'}
+            onClear={() => void api.clearHistory().then(() => setHistory([])).catch(() => setToast('Only an admin can clear history.'))}
+          />
+        )}
+
+        {showExtensions && (
+          <ExtensionsPanel
+            canOpen={canCreate}
+            isAdmin={self.role === 'admin'}
+            onClose={() => setShowExtensions(false)}
+            onManage={() => {
+              setShowExtensions(false);
+              setShowAdmin(true);
+            }}
+            onError={setToast}
+          />
         )}
 
         {showDownloads && (

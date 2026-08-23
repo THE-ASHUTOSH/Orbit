@@ -37,6 +37,9 @@ time. Text frames carry JSON control messages; binary frames carry video.
 | `tab.action` | `reload` / `back` / `forward` / `stop` / `duplicate` | control |
 | `tab.rename` | set the tab label | control |
 | `tab.resize` | change the streamed viewport | control |
+| `tab.zoom` | zoom 0.25-4, applied by resizing the remote viewport | control |
+| `tab.reopen` | reopen the most recently closed tab | role `tab.create` |
+| `context.probe` | ask what is under a page coordinate, for the right-click menu | view |
 | `clipboard.write` | insert text into the page | control + `CLIPBOARD_ENABLED` |
 | `file.chooser.respond` | answer a page's file dialog with uploaded names | control + `UPLOADS_ENABLED` |
 | `ping` | round-trip measurement | - |
@@ -95,6 +98,7 @@ Example:
 | `stream.started` / `stream.stopped` | stream lifecycle with the negotiated size |
 | `input.ack` | per-event timings: `serverReceiveTime`, `dispatchedAt`, `queueDepth` |
 | `clipboard.data` | text copied inside the page |
+| `context.info` | answer to `context.probe`: `link`, `image`, `selection` |
 | `file.chooser` | the page opened a file dialog |
 | `download` | download started / progress / completed / canceled |
 | `metrics` | server metrics, admins only, every 2s |

@@ -4,7 +4,17 @@
  * interactive goes over the WebSocket.
  */
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
-import { createReadStream, readdirSync, statSync, createWriteStream, existsSync, unlinkSync, mkdirSync, rmSync } from 'node:fs';
+import {
+  createReadStream,
+  readdirSync,
+  statSync,
+  createWriteStream,
+  existsSync,
+  unlinkSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -26,6 +36,13 @@ import {
   listTabGrants,
   listUsers,
   recentAudit,
+  addBookmark,
+  listBookmarks,
+  removeBookmark,
+  recentHistory,
+  searchHistory,
+  searchBookmarks,
+  clearHistory,
   revokeTab,
   setUserPassword,
   setUserRole,
@@ -35,7 +52,8 @@ import {
 import { COOKIE_NAME, serializeCookie, sessionFromRequest } from '../auth/session.js';
 import { roleCan } from '../auth/permissions.js';
 import { isOriginAllowed } from './origin.js';
-import { listExtensions, removeExtension } from '../browser/extensions.js';
+import { listExtensions, removeExtension, downloadFromWebStore, parseStoreId } from '../browser/extensions.js';
+import { normalizeUrl } from '../browser/TabManager.js';
 import { mountDevtools } from './devtools.js';
 import type { Runtime } from '../runtime.js';
 import type { Hub } from '../ws/hub.js';
@@ -304,7 +322,96 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
     res.json({ events: recentAudit(Number.isFinite(limit) ? limit : 100) });
   });
 
+  // --- bookmarks, history, address-bar suggestions --------------------------
+
+  app.get('/api/bookmarks', authed, (_req, res) => res.json({ bookmarks: listBookmarks() }));
+
+  app.post('/api/bookmarks', authed, (req, res) => {
+    const parsed = z.object({ url: z.string().min(1).max(2048), title: z.string().max(300).optional() }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+    const url = normalizeUrl(parsed.data.url);
+    if (!url) return res.status(400).json({ error: 'navigation_blocked' });
+    const bookmark = addBookmark(url, parsed.data.title ?? '', req.user!.id);
+    audit('bookmark.add', { userId: req.user!.id, detail: { url } });
+    res.status(201).json({ bookmark });
+  });
+
+  app.delete('/api/bookmarks/:name', authed, (req, res) => {
+    removeBookmark(param(req, 'name'));
+    res.json({ ok: true });
+  });
+
+  app.get('/api/history', authed, (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    res.json({ history: q ? searchHistory(q, 50) : recentHistory(100) });
+  });
+
+  app.delete('/api/history', authed, adminOnly, (req, res) => {
+    clearHistory();
+    audit('history.clear', { userId: req.user!.id });
+    res.json({ ok: true });
+  });
+
+  /** Bookmarks first, then history - what the address bar dropdown shows. */
+  app.get('/api/suggest', authed, (req, res) => {
+    const q = (typeof req.query.q === 'string' ? req.query.q : '').trim();
+    if (q.length < 1) return res.json({ suggestions: [] });
+    const seen = new Set<string>();
+    const suggestions = [
+      ...searchBookmarks(q, 4).map((b) => ({ kind: 'bookmark' as const, url: b.url, title: b.title })),
+      ...searchHistory(q, 8).map((h) => ({ kind: 'history' as const, url: h.url, title: h.title })),
+    ].filter((s) => (seen.has(s.url) ? false : (seen.add(s.url), true)));
+    res.json({ suggestions: suggestions.slice(0, 8) });
+  });
+
   // --- extensions ----------------------------------------------------------
+
+  /**
+   * The installed extensions, for the extensions panel. Readable by anyone
+   * signed in - it is the same list the toolbar of a normal browser shows -
+   * while installing and removing stays admin-only below.
+   */
+  app.get('/api/extensions', authed, (_req, res) => {
+    if (!config.extensionsEnabled) return res.json({ extensions: [] });
+    res.json({
+      extensions: listExtensions().map((e) => ({
+        id: e.id,
+        name: e.name,
+        version: e.version,
+        hasPopup: !!e.popupPath,
+        hasOptions: !!e.optionsPath,
+      })),
+    });
+  });
+
+  /**
+   * Open an extension's popup or options page.
+   *
+   * Extension popups are native Chromium windows: they are not part of any
+   * page's compositor surface, so they can never appear in a screencast. The
+   * page behind the popup is ordinary HTML though, so it is opened as a tab -
+   * which is also how you would reach an options page in a normal browser.
+   *
+   * The client sends an extension id, never a URL: the chrome-extension://
+   * address is built here from the installed list.
+   */
+  app.post('/api/extensions/:name/open', authed, (req, res) => {
+    if (!config.extensionsEnabled) return res.status(404).json({ error: 'disabled' });
+    if (!roleCan(req.user!.role, 'tab.create')) return res.status(403).json({ error: 'forbidden' });
+    const found = listExtensions().find((e) => e.id === param(req, 'name'));
+    if (!found) return res.status(404).json({ error: 'not_found' });
+    const wantOptions = req.query.page === 'options';
+    const page = (wantOptions ? found.optionsPath : found.popupPath) ?? found.optionsPath ?? found.popupPath;
+    if (!page) return res.status(404).json({ error: 'no_page' });
+    void rt.tabs
+      .createTab({
+        trustedUrl: `chrome-extension://${found.chromeId}/${page}`,
+        label: found.name,
+        createdBy: req.user!.id,
+      })
+      .catch((err) => log.warn('extension page could not be opened', { id: found.id, err: err as Error }));
+    res.status(202).json({ ok: true });
+  });
 
   app.get('/api/admin/extensions', authed, adminOnly, (_req, res) => {
     if (!config.extensionsEnabled) return res.status(404).json({ error: 'disabled' });
@@ -323,8 +430,63 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
   });
 
   /**
-   * Upload an extension as a .zip and unpack it. Unpacked extensions only - see
-   * browser/extensions.ts for why the Web Store is not an option here.
+   * Unpack a zip that is already on disk into the extensions directory. Shared
+   * by the upload and the Web Store routes: same validation, same failure modes.
+   */
+  const unpackExtension = (id: string, zipPath: string, res: Response, userId: string) => {
+    const target = path.join(config.extensionsDir, id);
+    rmSync(target, { recursive: true, force: true });
+    mkdirSync(target, { recursive: true });
+    // unzip rather than a zip library: it is one apt package, it handles the
+    // odd archive, and nothing here is on a hot path.
+    const out = spawnSync('unzip', ['-qq', '-o', zipPath, '-d', target], { timeout: 60_000 });
+    rmSync(zipPath, { force: true });
+    if (out.status !== 0) {
+      rmSync(target, { recursive: true, force: true });
+      const detail = (out.stderr?.toString() || out.error?.message || 'unzip failed').slice(0, 200);
+      log.warn('extension unpack failed', { id, detail });
+      return res.status(400).json({ error: 'unpack_failed', detail });
+    }
+    const found = listExtensions().find((e) => e.id === id);
+    if (!found) {
+      rmSync(target, { recursive: true, force: true });
+      return res.status(400).json({ error: 'no_manifest', detail: 'the archive has no manifest.json' });
+    }
+    audit('admin.extension.install', { userId, detail: { id, name: found.name, version: found.version } });
+    log.warn('extension installed', { id, name: found.name, version: found.version });
+    return res.status(201).json({ extension: found, restartRequiredToApply: true });
+  };
+
+  /**
+   * Install straight from the Chrome Web Store, by id or store URL.
+   *
+   * The extension is downloaded, unwrapped and unpacked - not verified. It runs
+   * in the shared browser with whatever permissions its manifest asks for, so
+   * this is admin-only and audited, exactly like an uploaded zip.
+   */
+  app.post('/api/admin/extensions/store', authed, adminOnly, (req, res) => {
+    if (!config.extensionsEnabled) return res.status(404).json({ error: 'disabled' });
+    const storeId = parseStoreId(String((req.body as { id?: unknown })?.id ?? ''));
+    if (!storeId) return res.status(400).json({ error: 'bad_id', detail: 'expected a Web Store id or URL' });
+
+    void downloadFromWebStore(storeId, rt.browser.chromeVersion)
+      .then((zip) => {
+        mkdirSync(config.extensionsDir, { recursive: true });
+        const zipPath = path.join(config.extensionsDir, `${storeId}.store.zip`);
+        writeFileSync(zipPath, zip);
+        unpackExtension(storeId, zipPath, res, req.user!.id);
+      })
+      .catch((err) => {
+        log.warn('web store install failed', { storeId, err: err as Error });
+        if (!res.headersSent)
+          res.status(502).json({ error: 'store_failed', detail: String((err as Error).message).slice(0, 120) });
+      });
+  });
+
+  /**
+   * Upload an extension as a .zip and unpack it. The route above installs the
+   * same thing straight from the Web Store; this one is for an extension that is
+   * not published there, or one an admin wants to read before running.
    */
   app.post('/api/admin/extensions/:name', authed, adminOnly, (req, res) => {
     if (!config.extensionsEnabled) return res.status(404).json({ error: 'disabled' });
@@ -334,7 +496,6 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
 
     mkdirSync(config.extensionsDir, { recursive: true });
     const zipPath = path.join(config.extensionsDir, `${id}.upload.zip`);
-    const target = path.join(config.extensionsDir, id);
     let written = 0;
     req.on('data', (chunk: Buffer) => {
       written += chunk.length;
@@ -342,28 +503,7 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
     });
 
     void pipeline(req, createWriteStream(zipPath))
-      .then(() => {
-        rmSync(target, { recursive: true, force: true });
-        mkdirSync(target, { recursive: true });
-        // unzip rather than a zip library: it is one apt package, it handles the
-        // odd archive, and nothing here is on a hot path.
-        const out = spawnSync('unzip', ['-qq', '-o', zipPath, '-d', target], { timeout: 60_000 });
-        rmSync(zipPath, { force: true });
-        if (out.status !== 0) {
-          rmSync(target, { recursive: true, force: true });
-          const detail = (out.stderr?.toString() || out.error?.message || 'unzip failed').slice(0, 200);
-          log.warn('extension unpack failed', { id, detail });
-          return res.status(400).json({ error: 'unpack_failed', detail });
-        }
-        const found = listExtensions().find((e) => e.id === id);
-        if (!found) {
-          rmSync(target, { recursive: true, force: true });
-          return res.status(400).json({ error: 'no_manifest', detail: 'the archive has no manifest.json' });
-        }
-        audit('admin.extension.install', { userId: req.user!.id, detail: { id, name: found.name, version: found.version } });
-        log.warn('extension installed', { id, name: found.name, version: found.version });
-        res.status(201).json({ extension: found, restartRequiredToApply: true });
-      })
+      .then(() => unpackExtension(id, zipPath, res, req.user!.id))
       .catch((err) => {
         rmSync(zipPath, { force: true });
         log.warn('extension upload failed', { id, err: err as Error });

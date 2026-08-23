@@ -221,6 +221,45 @@ export class Runtime extends EventEmitter {
     });
   }
 
+  /**
+   * What is under the pointer, for the client's context menu.
+   *
+   * Evaluated on demand rather than tracked continuously: it is needed once per
+   * right-click, and watching every mouse move would mean a round trip per
+   * pixel.
+   */
+  async probeContext(
+    tabId: string,
+    x: number,
+    y: number,
+  ): Promise<{ link: string | null; image: string | null; selection: string }> {
+    const tab = this.tabs.require(tabId);
+    const expression = `(() => {
+      const el = document.elementFromPoint(${Math.round(x)}, ${Math.round(y)});
+      const anchor = el && el.closest ? el.closest('a[href]') : null;
+      const img = el && el.tagName === 'IMG' ? el : (el && el.querySelector ? el.querySelector('img') : null);
+      return JSON.stringify({
+        link: anchor ? anchor.href : null,
+        image: img ? img.currentSrc || img.src : null,
+        // Bounded, but generously: this text is what the menu's Copy puts on
+        // the clicking user's clipboard. A copy larger than this still arrives
+        // in full, via the page's own copy event.
+        selection: String(document.getSelection() || '').slice(0, 8192),
+      });
+    })()`;
+    const res = await this.browser.cdp.send<{ result: { value?: string } }>(
+      'Runtime.evaluate',
+      { expression, returnByValue: true, timeout: 2000 },
+      tab.sessionId,
+    );
+    try {
+      const parsed = JSON.parse(res.result.value ?? '{}') as { link?: string; image?: string; selection?: string };
+      return { link: parsed.link ?? null, image: parsed.image ?? null, selection: parsed.selection ?? '' };
+    } catch {
+      return { link: null, image: null, selection: '' };
+    }
+  }
+
   async start(): Promise<void> {
     await this.browser.start();
   }

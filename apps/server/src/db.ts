@@ -107,6 +107,25 @@ CREATE TABLE IF NOT EXISTS tab_users (
   PRIMARY KEY (tab_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS bookmarks (
+  id         TEXT PRIMARY KEY,
+  url        TEXT NOT NULL UNIQUE,
+  title      TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  created_by TEXT
+);
+
+-- One row per URL rather than per visit: a visit counter plus a last-seen time
+-- is all the address bar needs to rank suggestions, and it keeps the table small
+-- without a pruning job.
+CREATE TABLE IF NOT EXISTS history (
+  url    TEXT PRIMARY KEY,
+  title  TEXT NOT NULL DEFAULT '',
+  at     INTEGER NOT NULL,
+  visits INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS history_at ON history(at);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id         TEXT PRIMARY KEY,
   at         INTEGER NOT NULL,
@@ -338,6 +357,98 @@ export const listTabGrants = (tabId: string) =>
     user_id: string;
     permission: TabPermission;
   }[];
+
+// --- bookmarks -------------------------------------------------------------
+
+export interface BookmarkRow {
+  id: string;
+  url: string;
+  title: string;
+  created_at: number;
+  created_by: string | null;
+}
+
+export function addBookmark(url: string, title: string, userId: string | null): BookmarkRow {
+  const row: BookmarkRow = { id: id('bmk'), url, title: title.slice(0, 300), created_at: Date.now(), created_by: userId };
+  db.prepare(
+    `INSERT INTO bookmarks (id, url, title, created_at, created_by) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(url) DO UPDATE SET title = excluded.title`,
+  ).run(row.id, row.url, row.title, row.created_at, row.created_by);
+  return (db.prepare('SELECT * FROM bookmarks WHERE url = ?').get(url) as unknown as BookmarkRow) ?? row;
+}
+
+export const listBookmarks = () =>
+  db.prepare('SELECT * FROM bookmarks ORDER BY created_at DESC').all() as unknown as BookmarkRow[];
+
+export const getBookmarkByUrl = (url: string) =>
+  db.prepare('SELECT * FROM bookmarks WHERE url = ?').get(url) as BookmarkRow | undefined;
+
+export const removeBookmark = (bookmarkId: string) =>
+  void db.prepare('DELETE FROM bookmarks WHERE id = ?').run(bookmarkId);
+
+// --- history ---------------------------------------------------------------
+
+/** Upsert a visit. Called on navigation, so it must stay cheap. */
+export function recordVisit(url: string, title: string): void {
+  if (!url || url === 'about:blank' || url.startsWith('chrome')) return;
+  db.prepare(
+    `INSERT INTO history (url, title, at, visits) VALUES (?, ?, ?, 1)
+     ON CONFLICT(url) DO UPDATE SET
+       at = excluded.at,
+       visits = history.visits + 1,
+       -- Keep the better title: pages often report an empty one mid-load.
+       title = CASE WHEN length(excluded.title) > 0 THEN excluded.title ELSE history.title END`,
+  ).run(url, title.slice(0, 300), Date.now());
+}
+
+export interface HistoryRow {
+  url: string;
+  title: string;
+  at: number;
+  visits: number;
+}
+
+export const recentHistory = (limit = 100) =>
+  db.prepare('SELECT * FROM history ORDER BY at DESC LIMIT ?').all(Math.min(limit, 500)) as unknown as HistoryRow[];
+
+/**
+ * Suggestions for the address bar, ranked by visit count then recency - the
+ * cheap half of what browsers call frecency, which is enough to put the site you
+ * always visit at the top.
+ */
+/**
+ * Escape, rather than strip, LIKE wildcards: stripping turns a query of "%" into
+ * an empty pattern that matches every row.
+ */
+const likePattern = (query: string) => `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+export const searchHistory = (query: string, limit = 8) => {
+  const like = likePattern(query);
+  return db
+    .prepare(
+      `SELECT * FROM history WHERE url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
+       ORDER BY visits DESC, at DESC LIMIT ?`,
+    )
+    .all(like, like, Math.min(limit, 25)) as unknown as HistoryRow[];
+};
+
+export const searchBookmarks = (query: string, limit = 5) => {
+  const like = likePattern(query);
+  return db
+    .prepare(
+      `SELECT * FROM bookmarks WHERE url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
+       ORDER BY created_at DESC LIMIT ?`,
+    )
+    .all(like, like, Math.min(limit, 25)) as unknown as BookmarkRow[];
+};
+
+export const clearHistory = () => void db.prepare('DELETE FROM history').run();
+
+/** Most recently closed tab, for "reopen closed tab". */
+export const lastClosedTab = () =>
+  db.prepare('SELECT * FROM tabs WHERE closed_at IS NOT NULL AND url != \'\' ORDER BY closed_at DESC LIMIT 1').get() as
+    | TabRow
+    | undefined;
 
 // --- audit -----------------------------------------------------------------
 

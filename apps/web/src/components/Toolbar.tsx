@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { forwardRef } from 'react';
 import type { TabInfo } from '@orbit/protocol';
+import { AddressBar } from './AddressBar';
 
 interface Props {
   tab: TabInfo | null;
@@ -7,20 +8,16 @@ interface Props {
   /** The ⋮ menu, rendered at the end of the bar. */
   menu: React.ReactNode;
   onResetZoom: () => void;
+  bookmarked: boolean;
+  onToggleBookmark: () => void;
   onNavigate: (url: string) => void;
   onAction: (action: 'reload' | 'back' | 'forward' | 'stop' | 'duplicate') => void;
 }
 
-export function Toolbar({ tab, canControl, menu, onResetZoom, onNavigate, onAction }: Props) {
-  const [value, setValue] = useState(tab?.url ?? '');
-  const [editing, setEditing] = useState(false);
-
-  // Follow the tab's real URL unless the user is mid-edit; the server is the
-  // authority on where the tab actually is.
-  useEffect(() => {
-    if (!editing) setValue(tab?.url === 'about:blank' ? '' : (tab?.url ?? ''));
-  }, [tab?.url, tab?.tabId, editing]);
-
+export const Toolbar = forwardRef<HTMLInputElement, Props>(function Toolbar(
+  { tab, canControl, menu, onResetZoom, bookmarked, onToggleBookmark, onNavigate, onAction },
+  addressRef,
+) {
   const disabled = !tab || !canControl;
 
   return (
@@ -39,28 +36,19 @@ export function Toolbar({ tab, canControl, menu, onResetZoom, onNavigate, onActi
         {tab?.loading ? '×' : '⟳'}
       </ToolButton>
 
-      <form
-        className="flex-1"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setEditing(false);
-          if (value.trim()) onNavigate(value.trim());
-        }}
+      <AddressBar ref={addressRef} url={tab?.url ?? ''} disabled={disabled} onNavigate={onNavigate} />
+
+      <button
+        onClick={onToggleBookmark}
+        disabled={!tab}
+        title={bookmarked ? 'Remove bookmark' : 'Bookmark this page'}
+        aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark this page'}
+        className={`size-7 shrink-0 rounded text-sm hover:bg-elev disabled:opacity-30 ${
+          bookmarked ? 'text-amber-400' : 'text-ink-2'
+        }`}
       >
-        <input
-          className="w-full rounded-full border border-line-2 bg-surface px-3 py-1.5 text-xs outline-none focus:border-sky-500 disabled:opacity-60"
-          value={value}
-          disabled={disabled}
-          placeholder={canControl ? 'Search or enter address' : 'View only'}
-          onChange={(e) => setValue(e.target.value)}
-          onFocus={(e) => {
-            setEditing(true);
-            e.currentTarget.select();
-          }}
-          onBlur={() => setEditing(false)}
-          spellCheck={false}
-        />
-      </form>
+        {bookmarked ? '★' : '☆'}
+      </button>
 
       {/* Only present when zoom is not 100%, the way a browser surfaces it -
           and clicking it puts you back to 100%. */}
@@ -78,7 +66,7 @@ export function Toolbar({ tab, canControl, menu, onResetZoom, onNavigate, onActi
       {menu}
     </div>
   );
-}
+});
 
 function ToolButton({
   children,

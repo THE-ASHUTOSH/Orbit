@@ -149,7 +149,7 @@ export class StreamManager {
     }
   }
 
-  private async ensureStarted(tabId: string): Promise<void> {
+  private async ensureStarted(tabId: string, attempt = 0): Promise<void> {
     const state = this.streams.get(tabId);
     if (!state || state.active || !this.cdp?.connected) return;
     let tab: Tab;
@@ -176,7 +176,20 @@ export class StreamManager {
       log.info('stream started', { tabId, width: tab.width, height: tab.height, quality: config.streamQuality });
     } catch (err) {
       state.active = false;
-      log.warn('failed to start screencast', { tabId, err: err as Error });
+      /**
+       * Retry, rather than leave a subscriber with a dead stream.
+       *
+       * Straight after a browser restart a restored page is briefly not an
+       * "active page" as far as Chromium is concerned, and a subscribe that
+       * lands in that window fails - measured: "Not attached to an active page".
+       * The subscription itself is real, so the only thing wrong is the timing.
+       */
+      if (attempt < 3 && this.streams.get(tabId) === state) {
+        await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+        if (this.streams.get(tabId) !== state) return;
+        return this.ensureStarted(tabId, attempt + 1);
+      }
+      log.warn('failed to start screencast', { tabId, err: err as Error, attempts: attempt + 1 });
     }
   }
 

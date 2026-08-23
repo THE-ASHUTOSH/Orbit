@@ -108,6 +108,25 @@ Navigation is restricted to `http(s)` plus `about:blank`. `file:`, `chrome:`,
 (`tabs.test.ts`), which keeps a remote user from pointing the shared browser at
 the container filesystem or at Chromium's own settings.
 
+The one `chrome-extension://` exception goes the other way round: the client
+sends an **extension id** to `POST /api/extensions/:id/open` and the server
+builds the URL from its own list of installed extensions. No client message can
+carry that scheme, and an id that is not installed is a 404.
+
+### Extensions
+
+An extension runs inside the shared browser with the permissions its manifest
+asks for, which means it can see every user's session. So:
+
+- installing (zip upload or Web Store id) is **admin-only** and audited;
+- nothing is signature-verified - a Web Store `.crx` is fetched, unwrapped and
+  unpacked, and the trust boundary is the admin who asked for it;
+- the extensions panel lists the permissions each one requests, and the whole
+  feature is off unless `EXTENSIONS_ENABLED` is set;
+- Chromium is launched with `--disable-extensions-except` pinned to exactly the
+  installed set, so nothing left in the profile from an earlier run loads
+  unnoticed.
+
 ## CSRF and origin
 
 Browsers do not apply same-origin to WebSockets and do send cookies on
@@ -148,6 +167,10 @@ Off unless `CLIPBOARD_ENABLED=1`. Page → client copies are delivered only to
 users with **control** on that tab, never to viewers, and clipboard text is never
 logged (the logger redacts `clipboard`, `text`, `token`, `password`, `cookie` and
 friends by key name).
+
+Paste is client-initiated: the viewer's own browser must grant clipboard read,
+and the text is then inserted into the focused element of the page. Orbit never
+reads a viewer's clipboard on its own, and the remote page cannot ask for it.
 
 ## Container hardening
 

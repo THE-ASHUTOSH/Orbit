@@ -20,6 +20,15 @@ const USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
  */
 const REMOTE_SELFTEST = process.env.SELFTEST_URL ?? 'http://127.0.0.1:3030/selftest';
 
+/**
+ * Where a signed-in session is saved, so the cleanup hook can reuse it.
+ *
+ * The server rate-limits logins per IP (10 a minute), and a suite that signs in
+ * once per test is close enough to that ceiling that one more login for cleanup
+ * would trip it. Note that two full runs inside the same minute still can.
+ */
+const SESSION_STATE = 'test-results/.session.json';
+
 async function signIn(page: Page, username = USERNAME, password = PASSWORD) {
   await page.goto('/');
   await page.getByLabel('Username').fill(username);
@@ -27,14 +36,17 @@ async function signIn(page: Page, username = USERNAME, password = PASSWORD) {
   await page.getByRole('button', { name: 'Login' }).click();
   // The ⋮ menu only exists once signed in; sign-out lives inside it now.
   await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
+  if (username === USERNAME) await page.context().storageState({ path: SESSION_STATE });
 }
 
 /**
- * Checksum of the middle of the canvas, where a page's content actually is.
+ * Checksum of the whole canvas, sampled on a grid.
  *
- * Sampling the top-left corner - or the first N characters of toDataURL() -
- * mostly measures background, so two genuinely different frames can look
- * identical. This reads real pixels from the centre band.
+ * Deliberately not a crop: a centre band is blank white whenever the remote
+ * viewport is larger than this client's stage (the page's content then sits in
+ * the top-left of the frame), and a corner or the head of toDataURL() is mostly
+ * background. Sampling across everything makes "is there a page here" and "did
+ * the page change" both mean what they say.
  */
 async function canvasSignature(page: Page): Promise<{ sum: number; distinct: number }> {
   return page.evaluate(() => {
@@ -42,16 +54,13 @@ async function canvasSignature(page: Page): Promise<{ sum: number; distinct: num
     if (!canvas || canvas.width === 0) return { sum: 0, distinct: 0 };
     const ctx = canvas.getContext('2d');
     if (!ctx) return { sum: 0, distinct: 0 };
-    const w = Math.min(canvas.width, 600);
-    const h = Math.min(canvas.height, 300);
-    const x = Math.max(0, Math.round((canvas.width - w) / 2));
-    const y = Math.max(0, Math.round((canvas.height - h) / 2));
-    const { data } = ctx.getImageData(x, y, w, h);
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const step = 4 * 17; // every 17th pixel: cheap, and no alignment with any grid the page draws
     let sum = 0;
     const seen = new Set<number>();
-    for (let i = 0; i < data.length; i += 4) {
+    for (let i = 0; i < data.length; i += step) {
       const px = (data[i]! << 16) | (data[i + 1]! << 8) | data[i + 2]!;
-      sum = (sum + px * ((i >> 2) + 1)) % 2147483647;
+      sum = (sum + px * (i + 1)) % 2147483647;
       if (seen.size < 64) seen.add(px);
     }
     return { sum, distinct: seen.size };
@@ -66,6 +75,48 @@ async function canvasHasContent(page: Page): Promise<boolean> {
 async function addressBar(page: Page) {
   return page.getByPlaceholder('Search or enter address');
 }
+
+/**
+ * The element that actually receives input: a transparent textarea sits over the
+ * canvas (it is what makes IME and key events work), so clicking the canvas
+ * itself is always intercepted.
+ */
+const stage = (page: Page) => page.getByRole('textbox', { name: /Remote browser viewport/ });
+
+/**
+ * Leave the shared browser as it was found: one tab, parked on a page that does
+ * not repaint.
+ *
+ * Without this, every run leaks a tab still animating the self-test page - and
+ * since all runs share one Chromium, a few runs are enough to saturate it and
+ * make the pixel assertions fail for reasons that have nothing to do with the
+ * code under test.
+ */
+test.afterAll(async ({ browser }) => {
+  const context = await browser.newContext({ storageState: SESSION_STATE });
+  const page = await context.newPage();
+  try {
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
+    const tabIds = async () =>
+      page.evaluate(async () => {
+        const { state } = await (await fetch('/api/state')).json();
+        return (state.tabs as { tabId: string }[]).map((t) => t.tabId);
+      });
+    const ids = await tabIds();
+    for (const id of ids.slice(0, -1)) {
+      const row = page.locator(`div[title*="${id}"]`);
+      await row.hover();
+      await row.getByRole('button', { name: 'Close tab' }).click();
+      await expect.poll(async () => (await tabIds()).includes(id), { timeout: 20_000 }).toBe(false);
+    }
+    const bar = await addressBar(page);
+    await bar.fill('about:blank');
+    await bar.press('Enter');
+  } finally {
+    await context.close();
+  }
+});
 
 test.describe('orbit UI', () => {
   test('signs in, streams a page, and accepts real input', async ({ page }) => {
@@ -133,6 +184,94 @@ test.describe('orbit UI', () => {
     } finally {
       for (const c of contexts) await c.close();
     }
+  });
+
+  test('bookmarks a page, lists it, and removes it', async ({ page }) => {
+    await signIn(page);
+    await (await addressBar(page)).fill(REMOTE_SELFTEST);
+    await (await addressBar(page)).press('Enter');
+
+    /**
+     * Start from "not bookmarked", whatever an earlier run left behind - and do
+     * it through the API rather than by clicking the star, so the delete is known
+     * to have completed before the add is sent. Only this page's bookmark is
+     * touched; anything else in the shared list is left alone.
+     */
+    await page.evaluate(async (url) => {
+      const { bookmarks } = await (await fetch('/api/bookmarks')).json();
+      for (const b of bookmarks as { id: string; url: string }[])
+        if (b.url === url) await fetch(`/api/bookmarks/${b.id}`, { method: 'DELETE' });
+    }, REMOTE_SELFTEST);
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
+
+    const star = page.getByRole('button', { name: 'Bookmark this page' });
+    await expect(star).toBeVisible({ timeout: 20_000 });
+    await star.click();
+
+    // The star flips, which means the server confirmed the bookmark.
+    const unstar = page.getByRole('button', { name: 'Remove bookmark' });
+    await expect(unstar).toBeVisible();
+
+    await page.getByRole('button', { name: 'Menu' }).click();
+    await page.getByRole('menuitem', { name: 'Bookmarks' }).click();
+    const panel = page.locator('aside', { hasText: 'Bookmarks' });
+    // .first(): the row shows the title over the URL, and a page bookmarked
+    // before it reported a title shows the URL in both.
+    await expect(panel.getByText(REMOTE_SELFTEST, { exact: false }).first()).toBeVisible();
+
+    // Clean up, so a re-run starts from the same state.
+    await panel.getByRole('button', { name: /^Remove bookmark/ }).first().click();
+    await expect(panel.getByText(REMOTE_SELFTEST, { exact: false })).toHaveCount(0);
+    await panel.getByRole('button', { name: 'close' }).click();
+  });
+
+  test('the address bar suggests pages that have been visited', async ({ page }) => {
+    await signIn(page);
+    // Visit the page first so it is in history, then look for it by fragment.
+    await (await addressBar(page)).fill(REMOTE_SELFTEST);
+    await (await addressBar(page)).press('Enter');
+    await expect.poll(() => canvasHasContent(page), { timeout: 30_000 }).toBe(true);
+
+    const bar = await addressBar(page);
+    await bar.click();
+    await bar.fill('selftest');
+    // A suggestion list appears, and Enter on the highlighted row navigates.
+    const suggestion = page.locator('ul li button', { hasText: '127.0.0.1' }).first();
+    await expect(suggestion).toBeVisible({ timeout: 10_000 });
+    await bar.press('ArrowDown');
+    await bar.press('Enter');
+    await expect(bar).toHaveValue(new RegExp('selftest'));
+  });
+
+  test('right-clicking the page opens Orbit\'s own context menu', async ({ page }) => {
+    await signIn(page);
+    await (await addressBar(page)).fill(REMOTE_SELFTEST);
+    await (await addressBar(page)).press('Enter');
+    await expect.poll(() => canvasHasContent(page), { timeout: 30_000 }).toBe(true);
+
+    // Chromium's native menu can never appear in a screencast, so this menu is
+    // built from what the server reports is under the pointer.
+    await stage(page).click({ button: 'right', position: { x: 120, y: 120 } });
+    const menu = page.getByRole('menu').filter({ hasText: 'Reload' });
+    await expect(menu).toBeVisible({ timeout: 15_000 });
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+  });
+
+  test('Alt+T opens a tab and Alt+W closes it', async ({ page }) => {
+    await signIn(page);
+    const tabs = page.locator('div[title*="tab_"]');
+    const initial = await tabs.count();
+
+    // Orbit's shortcuts are on Alt: Ctrl+T and Ctrl+W belong to the browser the
+    // client is running in and cannot be intercepted from a page.
+    await stage(page).click({ position: { x: 60, y: 60 } });
+    await page.keyboard.press('Alt+t');
+    await expect(tabs).toHaveCount(initial + 1);
+
+    await page.keyboard.press('Alt+w');
+    await expect(tabs).toHaveCount(initial);
   });
 
   test('rejects a bad password without revealing whether the user exists', async ({ page }) => {

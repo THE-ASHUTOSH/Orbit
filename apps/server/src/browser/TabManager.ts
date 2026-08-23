@@ -227,6 +227,12 @@ export class TabManager extends EventEmitter {
    */
   async createTab(opts: {
     url?: string | null;
+    /**
+     * A URL the server built itself, used as-is. Only for schemes a client may
+     * not ask for by name - chrome-extension:// pages, opened from the installed
+     * extension list. Never fed from a client message.
+     */
+    trustedUrl?: string;
     label?: string | null;
     createdBy: string | null;
     reuseTabId?: string;
@@ -237,7 +243,7 @@ export class TabManager extends EventEmitter {
     if (this.tabs.size >= config.maxTabs && !opts.reuseTabId) throw new Error('tab_limit');
 
     const tabId = opts.reuseTabId ?? id('tab');
-    const url = resolveTabUrl(opts.url, config.homeUrl);
+    const url = opts.trustedUrl ?? resolveTabUrl(opts.url, config.homeUrl);
     // Headless composites every page target, so tabs can share one window. A
     // headed browser only composites the focused window, so each tab gets its
     // own - otherwise every background tab's stream freezes.
