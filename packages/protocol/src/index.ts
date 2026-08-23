@@ -447,6 +447,62 @@ export function modifiersFrom(e: {
 }
 
 /**
+ * Which of Orbit's own shortcuts a key event is, if any.
+ *
+ * Alt/Option, and matched on `code` - the physical key - because on a Mac
+ * Option+T produces the key "†", Option+W "∑" and Option+1 "¡". Matching on
+ * `key` meant none of these worked on macOS at all.
+ *
+ * Lives here, rather than in the component, so it can be tested against the
+ * events a real keyboard produces on each platform.
+ */
+export function shortcutForKey(e: {
+  code: string;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+}): string | null {
+  if (!e.altKey || e.ctrlKey || e.metaKey) return null;
+  const digit = /^Digit([1-9])$/.exec(e.code)?.[1];
+  if (digit) return `selectTab:${digit}`;
+  switch (e.code) {
+    case 'KeyT':
+      return e.shiftKey ? 'reopenTab' : 'newTab';
+    case 'KeyW':
+      return 'closeTab';
+    case 'KeyD':
+      return 'focusAddress';
+    case 'ArrowLeft':
+      return 'back';
+    case 'ArrowRight':
+      return 'forward';
+    default:
+      return null;
+  }
+}
+
+/**
+ * The same modifiers, as the *remote* browser needs to see them.
+ *
+ * A viewer on a Mac holds Command for every accelerator - copy, paste, select
+ * all - and that arrives as Meta. The browser being driven is the Linux one in
+ * the container, where Meta is the Super key and means nothing, so Command has
+ * to travel as Ctrl. Measured: without this, ⌘C and ⌘V did nothing at all.
+ *
+ * Ctrl is left alone, so a Mac user who presses Ctrl+C (or anyone on Linux or
+ * Windows) is unaffected, and Ctrl+Command collapses to a single Ctrl.
+ */
+export function remoteModifiers(
+  e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  commandIsAccelerator: boolean,
+): number {
+  const raw = modifiersFrom(e);
+  if (!commandIsAccelerator || !e.metaKey) return raw;
+  return (raw & ~MOD.meta) | MOD.ctrl;
+}
+
+/**
  * Palette for per-user dots and cursors.
  *
  * A curated list rather than `hue = hash % 360`: adjacent hues are

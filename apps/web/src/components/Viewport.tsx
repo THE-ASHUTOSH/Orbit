@@ -12,8 +12,24 @@
  * translated to remote-viewport coordinates and forwarded.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { modifiersFrom, nextZoom, type Cursor, type TabInfo } from '@orbit/protocol';
+import {
+  modifiersFrom,
+  remoteModifiers,
+  shortcutForKey,
+  nextZoom,
+  type Cursor,
+  type TabInfo,
+} from '@orbit/protocol';
 import type { BrowserSocket } from '../lib/socket';
+
+/**
+ * Whether Command is this viewer's accelerator key. Chromium's own
+ * userAgentData is preferred; navigator.platform is the fallback that still
+ * works everywhere.
+ */
+const APPLE = /mac|iphone|ipad|ipod/i.test(
+  (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? '',
+);
 
 interface Props {
   socket: BrowserSocket;
@@ -41,7 +57,16 @@ const hostOf = (url: string) => {
   }
 };
 
-export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom, onShortcut, onContextMenu }: Props) {
+export function Viewport({
+  socket,
+  tab,
+  canControl,
+  cursors,
+  selfUserId,
+  onZoom,
+  onShortcut,
+  onContextMenu,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -171,7 +196,7 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom,
   const onPointerMove = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch') return; // handled by touch events
     const { x, y } = toRemote(e.clientX, e.clientY);
-    moveQueue.current = { x, y, buttons: e.buttons, modifiers: modifiersFrom(e) };
+    moveQueue.current = { x, y, buttons: e.buttons, modifiers: remoteModifiers(e, APPLE) };
     if (!rafRef.current) rafRef.current = requestAnimationFrame(flushMove);
   };
 
@@ -201,7 +226,9 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom,
       button: mouseButton(e.button),
       buttons: e.buttons,
       clickCount: (e.nativeEvent as MouseEvent).detail || 1,
-      modifiers: modifiersFrom(e),
+      // Cmd+click on a Mac is "open in a new tab", which the remote Linux
+      // browser spells Ctrl+click.
+      modifiers: remoteModifiers(e, APPLE),
     });
   };
 
@@ -217,7 +244,9 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom,
       button: mouseButton(e.button),
       buttons: e.buttons,
       clickCount: (e.nativeEvent as MouseEvent).detail || 1,
-      modifiers: modifiersFrom(e),
+      // Cmd+click on a Mac is "open in a new tab", which the remote Linux
+      // browser spells Ctrl+click.
+      modifiers: remoteModifiers(e, APPLE),
     });
   };
 
@@ -251,39 +280,50 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom,
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isDevtools(e)) return; // let the local browser have it
-    // Ctrl/Cmd +, - and 0 are zoom, the same as in any browser. Handled here
-    // rather than forwarded: a headless browser has no zoom UI to receive them.
+
     /**
      * Orbit's own shortcuts use Alt/Option, not Ctrl/Cmd.
      *
      * Ctrl+T, Ctrl+W, Ctrl+L and friends are reserved by the browser Orbit is
      * running in and cannot be intercepted from a page - mapping them would, at
      * best, do nothing and, in the case of Ctrl+W, close the user's real tab.
+     * shortcutForKey matches on the physical key, so Option+T on a Mac (which
+     * produces "†") still means "new tab".
      */
-    if (e.altKey && !e.ctrlKey && !e.metaKey) {
-      const key = e.key.toLowerCase();
-      const action =
-        key === 't' ? (e.shiftKey ? 'reopenTab' : 'newTab')
-        : key === 'w' ? 'closeTab'
-        : key === 'd' ? 'focusAddress'
-        : key === 'arrowleft' ? 'back'
-        : key === 'arrowright' ? 'forward'
-        : /^[1-9]$/.test(key) ? `selectTab:${key}`
-        : null;
-      if (action && onShortcut(action)) {
-        e.preventDefault();
-        return;
-      }
-    }
-    if ((e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) && onShortcut('reload')) {
+    const shortcut = shortcutForKey(e);
+    if (shortcut && onShortcut(shortcut)) {
       e.preventDefault();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && ['=', '+', '-', '_', '0'].includes(e.key)) {
+
+    /** Ctrl on Windows and Linux, Command on a Mac: the accelerator key. */
+    const accel = e.ctrlKey || (APPLE && e.metaKey);
+
+    if ((e.key === 'F5' || (accel && e.code === 'KeyR')) && onShortcut('reload')) {
       e.preventDefault();
-      if (canControl) onZoom(e.key === '0' ? 1 : nextZoom(tab.zoom ?? 1, e.key === '-' || e.key === '_' ? -1 : 1));
       return;
     }
+    if (accel && ['Equal', 'Minus', 'Digit0', 'NumpadAdd', 'NumpadSubtract', 'Numpad0'].includes(e.code)) {
+      e.preventDefault();
+      const out = e.code === 'Minus' || e.code === 'NumpadSubtract';
+      const reset = e.code === 'Digit0' || e.code === 'Numpad0';
+      if (canControl) onZoom(reset ? 1 : nextZoom(tab.zoom ?? 1, out ? -1 : 1));
+      return;
+    }
+
+    /**
+     * Paste is deliberately NOT cancelled or forwarded here.
+     *
+     * Letting the key through means this browser fires its own `paste` event on
+     * the textarea below, which already forwards the text as `input.text` - and
+     * that needs no clipboard permission and no prompt. It is also the only path
+     * that pastes what the *user* copied: Ctrl+V inside the remote browser would
+     * paste the container's clipboard instead.
+     *
+     * This is what was broken: the blanket preventDefault further down cancelled
+     * the default paste action, so the paste event never fired.
+     */
+    if (accel && e.code === 'KeyV' && !e.altKey) return;
     if (composing.current || e.nativeEvent.isComposing) return; // IME will commit via compositionend
     e.preventDefault();
     if (!canControl) return;
@@ -295,7 +335,7 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom,
       code: e.code,
       location: e.location,
       repeat: e.repeat,
-      modifiers: modifiersFrom(e),
+      modifiers: remoteModifiers(e, APPLE),
     });
   };
 
@@ -311,7 +351,7 @@ export function Viewport({ socket, tab, canControl, cursors, selfUserId, onZoom,
       code: e.code,
       location: e.location,
       repeat: false,
-      modifiers: modifiersFrom(e),
+      modifiers: remoteModifiers(e, APPLE),
     });
   };
 

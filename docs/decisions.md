@@ -318,12 +318,28 @@ that actually work through a stream.
   id - the URL is built server-side, because `chrome-extension://` is otherwise
   a scheme no client may navigate to.
 
+- **Accelerators travel as Ctrl, with an explicit editing command.** Two things
+  are needed to make Ctrl/⌘+C actually copy. First, a Mac viewer's ⌘ has to
+  arrive as Ctrl: the remote browser is Linux, where Meta is the Super key, so ⌘
+  otherwise does nothing at all. Second, Chromium resolves editing accelerators
+  in its *browser* process from real OS input and hands the renderer a command -
+  so an injected key event needs CDP's `commands` field, or the page sees
+  "Ctrl held, letter pressed" and nothing happens. Both are measured in the
+  tests (`keymap.test.ts`, and a real copy/paste round trip in the integration
+  and UI suites). Paste is the exception: it is deliberately *not* forwarded, so
+  the viewer's own browser fires its `paste` event and the text comes from the
+  clipboard the user actually copied into.
+
 **Tradeoffs.** The shortcuts are not the ones muscle memory expects, which is
 why they are listed in the README and in the menu. Copy from the page uses the
 selection the probe already reported rather than a synthetic `Ctrl+C`, and paste
 depends on the *viewer's* browser granting clipboard read - a prompt Orbit cannot
 answer for it. An extension that draws its popup as a native panel with no page
-behind it has nothing to open, and the panel says so ("no page").
+behind it has nothing to open, and the panel says so ("no page"). Extension *hotkeys* do work, both kinds: a
+content script's own keydown listener sees forwarded keys, and a
+`chrome.commands` shortcut fires too - Chromium hands an unhandled key event back
+to the browser process, so its accelerators still run. Measured with a probe
+extension, not assumed.
 
 ---
 

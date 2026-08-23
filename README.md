@@ -104,7 +104,7 @@ panel is also where anyone opens an extension's popup or options page.
 
 | Command | What it does |
 |---|---|
-| `./orbit test` | full suite: 76 tests, including real-Chromium integration |
+| `./orbit test` | full suite: 98 tests, including real-Chromium integration |
 | `./orbit bench [users] [tabs] [secs]` | latency and throughput benchmark |
 | `./orbit dev` | run from source without Docker (API `:3030`, Vite `:5173`) |
 | `npm run typecheck` | TypeScript across every workspace |
@@ -177,10 +177,20 @@ server what is under the pointer and builds the menu from the answer: open a lin
 or image in a new tab, copy a link or image address, back/forward/reload, copy,
 paste, select all.
 
-**Keyboard shortcuts** — on Alt/Option, deliberately. `Ctrl+T`, `Ctrl+W` and
+**Keyboard shortcuts.** Two kinds, and the difference matters.
+
+*What the remote page gets:* everything you press that Orbit does not claim,
+including `Ctrl/⌘+C`, `V`, `X`, `A`, `Z` and any hotkey an extension registers.
+On a Mac, ⌘ travels as Ctrl — the browser being driven is the Linux one in the
+container, where Meta is the Super key and means nothing. Copy runs as a real
+editing command in the page and the text comes back to *your* clipboard; paste
+sends *your* clipboard, never the container's.
+
+*Orbit's own shortcuts:* on Alt/Option, deliberately. `Ctrl+T`, `Ctrl+W` and
 `Ctrl+L` belong to the browser Orbit is displayed *in* and cannot be intercepted
 from a page; mapping them would, at best, do nothing and, in `Ctrl+W`'s case,
-close your own tab.
+close your own tab. They are matched by physical key, so Option+T is still "new
+tab" on macOS, where it types "†".
 
 | Shortcut | Action |
 | --- | --- |
@@ -192,6 +202,10 @@ close your own tab.
 | `Alt+←` / `Alt+→` | Back / forward |
 | `F5`, `Ctrl+R` | Reload |
 | `Ctrl+±`, `Ctrl+0` | Zoom in/out, reset |
+
+One caveat that is not Orbit's to fix: a chord your *own* browser reserves
+(`⌘⇧H` is Home in Chrome, for instance) never reaches the page, so an extension
+bound to one of those needs rebinding to something free.
 
 **Extensions.** An extensions panel in the ⋮ menu lists what is installed and
 opens an extension's popup or options page. Admins install by pasting a **Chrome
@@ -362,7 +376,7 @@ About 9,000 lines of TypeScript and 1,800 lines of documentation.
 
 ## Tests
 
-`./orbit test` runs **90 tests**, including an integration suite against a real
+`./orbit test` runs **98 tests**, including an integration suite against a real
 Chromium:
 
 - **unit** — scrypt hashing and timing, session cookie signing and tampering, the
@@ -384,7 +398,8 @@ Chromium:
   none lost; a viewer's input refused server-side; per-tab grants enforced;
   popups adopted; SPA title changes reported; cookies shared across the profile;
   a right-click probe finding the real anchor under the pointer (and nothing in
-  empty space); a paste arriving in the page's focused field;
+  empty space); a paste arriving in the page's focused field; Ctrl+A/C/V/X really
+  selecting, copying, pasting and cutting in the page;
   one user disconnecting while another keeps working; reconnect restoring the
   previous tab; malformed and over-rate messages rejected; **`SIGKILL` on
   Chromium recovered with tab ids preserved and input working again**; graceful
@@ -393,20 +408,22 @@ Chromium:
 `npm run test:e2e` additionally drives the UI in a real browser with Playwright
 (two independent contexts standing in for two machines): sign-in, streaming and
 live pixels, tab create/switch/close, bookmarking a page and finding it in the
-panel, address-bar suggestions from history, the right-click menu, and
-`Alt+T`/`Alt+W`. It is opt-in because Playwright downloads browser binaries:
+panel, address-bar suggestions from history, the right-click menu,
+`Alt+T`/`Alt+W`, and a copy-and-paste round trip through the accelerator key. It
+is opt-in because Playwright downloads browser binaries:
 
 ```bash
 npm i -D @playwright/test && npx playwright install chromium
 ADMIN_PASSWORD=... npm run test:e2e
 ```
 
-Logins are rate-limited to 10 a minute per IP, and one full run signs in nine
-times - two runs inside the same minute will hit that limit, not a bug.
+Logins are rate-limited to 10 a minute per IP, so the suite signs in once and
+reuses the session for the rest - which is also why a full run takes seconds.
 
-The integration suite launches a real browser, so it is timing-sensitive: under
-heavy CPU load a frame-timing assertion can occasionally flake. Re-run with
-`ITEST_LOG=debug npm test` to see why.
+Both suites launch real browsers, so the assertions that wait on *pixels* are
+timing-sensitive: under load - or while Chromium is still coming up after a
+restart - "no frame within 30s" can fail for reasons unrelated to the code.
+Re-run before believing it, and use `ITEST_LOG=debug npm test` when it repeats.
 
 ---
 

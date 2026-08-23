@@ -221,6 +221,11 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
 <html><head><meta charset="utf-8"><title>Stream self-test</title></head>
 <body style="margin:0;height:100vh;display:grid;place-items:center;font:600 clamp(24px,6vw,64px)/1.3 system-ui,sans-serif;color:#fff;background:#111">
   <div style="text-align:center">
+    <!-- A paste target, top-left at a fixed position: input coming from a
+         viewer's clipboard is the one thing that cannot be checked by looking at
+         pixels, so its value is mirrored into the title below. -->
+    <input id="p" placeholder="paste target" aria-label="paste target"
+           style="position:fixed;left:20px;top:20px;width:360px;height:36px;font-size:16px">
     <div id="t">--</div>
     <div id="n" style="font-size:.45em;opacity:.75">repaints: 0</div>
     <div id="bar" style="margin-top:.6em;height:22px;width:60vw;background:linear-gradient(90deg,#0ea5e9,#a855f7,#f59e0b);border-radius:11px"></div>
@@ -228,6 +233,7 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
   <script>
     var i = 0;
     var t = document.getElementById('t'), n = document.getElementById('n'), bar = document.getElementById('bar');
+    var p = document.getElementById('p');
     // setInterval, not requestAnimationFrame: rAF is tied to the compositor and
     // to page visibility, and this page has to keep changing pixels even in a
     // tab nobody is looking at - that is the whole point of a load generator.
@@ -238,7 +244,7 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
       bar.style.transform = 'translateX(' + Math.round(Math.sin(i / 15) * 40) + 'px)';
       // Mirrored into the title so the server (and docs/troubleshooting.md) can
       // tell "page JS is not running" apart from "frames are not arriving".
-      if (i % 10 === 0) document.title = 'self-test ' + i;
+      if (i % 10 === 0) document.title = (p.value ? 'pasted:' + p.value + ' ' : '') + 'self-test ' + i;
     }, 33);
   </script>
 </body></html>`);

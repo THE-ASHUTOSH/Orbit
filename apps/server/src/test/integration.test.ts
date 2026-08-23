@@ -163,6 +163,16 @@ class TestClient {
     }
   }
 
+  /** A Ctrl chord, the way the client sends one (Command is mapped to Ctrl there). */
+  async chord(tabId: string, code: string, shift = false): Promise<void> {
+    const key = code.replace(/^Key/, '').toLowerCase();
+    const modifiers = 2 | (shift ? 8 : 0);
+    for (const event of ['keydown', 'keyup'] as const) {
+      this.sendInput({ type: 'input.keyboard', event, tabId, key, code, location: 0, repeat: false, modifiers });
+    }
+    await sleep(120);
+  }
+
   async click(tabId: string, x: number, y: number): Promise<void> {
     this.sendInput({ type: 'input.mouse', event: 'mousemove', tabId, x, y, buttons: 0 });
     this.sendInput({ type: 'input.mouse', event: 'mousedown', tabId, x, y, button: 'left', buttons: 1, clickCount: 1 });
@@ -396,6 +406,43 @@ test('orbit: end to end', async (t) => {
     alice.send({ type: 'cursor', tabId: tab1.tabId, x: 300, y: 200, active: true });
     const cursors = await carol.waitForMessage('cursors', (m) => m.tabId === tab1.tabId && m.cursors.length > 0);
     assert.ok(cursors.cursors.some((c) => c.displayName === 'admin'));
+  });
+
+  await t.test('Ctrl+A, Ctrl+C and Ctrl+V really select, copy and paste in the page', async () => {
+    /**
+     * The regression this pins: Chromium resolves these accelerators in the
+     * browser process from real OS input, so an injected key event needs the
+     * CDP `commands` field. Without it - measured - Ctrl+C did nothing at all,
+     * which is exactly how a user experiences "copy does not work".
+     */
+    typed.clear();
+    await alice.click(tab1.tabId, 120, 60);
+    await alice.type(tab1.tabId, 'copy me');
+    await waitFor('typed text', () => typed.get('one-b'));
+
+    await alice.chord(tab1.tabId, 'KeyA'); // select all
+    await alice.chord(tab1.tabId, 'KeyC'); // copy
+
+    // The page's own copy event fired, and the text came back to the client -
+    // which is what puts it on the user's clipboard.
+    const copied = await alice.waitForMessage('clipboard.data', (m) => m.tabId === tab1.tabId);
+    assert.match(copied.text, /copy me$/, `the selection was copied: ${JSON.stringify(copied.text)}`);
+
+    // And paste puts it back: select all, then paste over the selection.
+    await alice.chord(tab1.tabId, 'KeyA');
+    await alice.chord(tab1.tabId, 'KeyV');
+    const pasted = await waitFor('pasted text', () => {
+      const v = typed.get('one-b');
+      return v && v.includes('copy me') ? v : null;
+    });
+    assert.ok(pasted.includes('copy me'), `paste restored the text: ${pasted}`);
+
+    // Ctrl+X, which also leaves the field empty for the tests that follow -
+    // they click into it and assume the caret lands at the end.
+    await alice.chord(tab1.tabId, 'KeyA');
+    await alice.chord(tab1.tabId, 'KeyX');
+    const emptied = await waitFor('field emptied by cut', () => (typed.get('one-b') === '' ? 'empty' : null));
+    assert.equal(emptied, 'empty', 'cut removed the selection');
   });
 
   await t.test('a right-click probe reports what is under the pointer, and paste reaches the page', async () => {

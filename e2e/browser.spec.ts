@@ -7,6 +7,7 @@
  * separate WebSockets, one shared Chromium behind them.
  */
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
+import { existsSync, readFileSync } from 'node:fs';
 
 const PASSWORD = process.env.ADMIN_PASSWORD ?? 'changeme';
 const USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
@@ -30,6 +31,21 @@ const REMOTE_SELFTEST = process.env.SELFTEST_URL ?? 'http://127.0.0.1:3030/selft
 const SESSION_STATE = 'test-results/.session.json';
 
 async function signIn(page: Page, username = USERNAME, password = PASSWORD) {
+  /**
+   * Reuse the session from an earlier test when there is one.
+   *
+   * Nine logins in a forty-second run sits right on the server's limit of ten a
+   * minute per IP - which is the limiter working correctly, and a pointless way
+   * for this suite to fail. Cookies from the first sign-in are enough.
+   */
+  if (username === USERNAME && existsSync(SESSION_STATE)) {
+    const saved = JSON.parse(readFileSync(SESSION_STATE, 'utf8')) as { cookies?: never[] };
+    if (saved.cookies?.length) {
+      await page.context().addCookies(saved.cookies);
+      await page.goto('/');
+      if (await page.getByRole('button', { name: 'Menu' }).isVisible().catch(() => false)) return;
+    }
+  }
   await page.goto('/');
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(password);
@@ -272,6 +288,55 @@ test.describe('orbit UI', () => {
 
     await page.keyboard.press('Alt+w');
     await expect(tabs).toHaveCount(initial);
+  });
+
+  test('copy and paste work with the accelerator key', async ({ page, context }) => {
+    /**
+     * The reported regression: Ctrl/Cmd+C and Ctrl/Cmd+V did nothing.
+     *
+     * Two separate causes, both covered here - the remote browser needs an
+     * explicit editing command for a copy, and paste has to come from *this*
+     * machine's clipboard (the container's is a different clipboard entirely).
+     * ControlOrMeta is Playwright's "whatever this platform's accelerator is".
+     */
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await signIn(page);
+    await (await addressBar(page)).fill(REMOTE_SELFTEST);
+    await (await addressBar(page)).press('Enter');
+    await expect.poll(() => canvasHasContent(page), { timeout: 30_000 }).toBe(true);
+
+    // Copy: select the remote page and copy it; the text must arrive here.
+    await stage(page).click({ position: { x: 200, y: 200 } });
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('ControlOrMeta+c');
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText().catch(() => '')), { timeout: 15_000 })
+      .toContain('repaints:');
+
+    // Paste: put a known string on this machine's clipboard and paste it into
+    // the self-test page's input, which mirrors its value into the tab title.
+    const marker = `orbit-paste-${Date.now()}`;
+    await page.evaluate((text) => navigator.clipboard.writeText(text), marker);
+    const canvas = (await page.locator('canvas').boundingBox())!;
+    const frameWidth = await page.evaluate(async () => {
+      const { state } = await (await fetch('/api/state')).json();
+      return state.tabs.find((t: { url: string }) => t.url.includes('selftest'))?.width ?? 1;
+    });
+    // The input sits at 20,20 in page coordinates; the frame is scaled to fit.
+    const fit = canvas.width / frameWidth;
+    await page.mouse.click(canvas.x + 60 * fit, canvas.y + 38 * fit);
+    await page.keyboard.press('ControlOrMeta+v');
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const { state } = await (await fetch('/api/state')).json();
+            return (state.tabs as { title: string }[]).map((t) => t.title).join(' | ');
+          }),
+        { timeout: 20_000 },
+      )
+      .toContain(marker);
   });
 
   test('rejects a bad password without revealing whether the user exists', async ({ page }) => {

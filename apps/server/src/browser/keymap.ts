@@ -82,9 +82,32 @@ export interface CdpKeyEvent {
   isKeypad: boolean;
   text?: string;
   unmodifiedText?: string;
+  /** Editing commands to run alongside the key event. See EDIT_COMMANDS. */
+  commands?: string[];
 }
 
 const CTRL_ALT_META = 1 | 2 | 4; // alt|ctrl|meta
+
+/**
+ * Editing accelerators, by physical key.
+ *
+ * A virtual key code is not enough for these. Chromium resolves Ctrl+C and
+ * friends in the *browser* process, from real OS input, and hands the renderer
+ * an editing command - so a key event injected straight into the renderer looks
+ * like someone held Ctrl and pressed a letter, and nothing happens. Measured:
+ * without this, Ctrl+C, Ctrl+V and Ctrl+A had no effect on the page at all.
+ *
+ * `commands` is the CDP field that supplies what the browser process normally
+ * would. Addressed by `code` so a non-QWERTY layout still copies with Ctrl+C.
+ */
+const EDIT_COMMANDS: Record<string, string> = {
+  KeyC: 'copy',
+  KeyX: 'cut',
+  KeyV: 'paste',
+  KeyA: 'selectAll',
+  KeyZ: 'undo',
+  KeyY: 'redo',
+};
 
 /**
  * `key` is the DOM key value, `code` the physical key. `modifiers` is the
@@ -121,6 +144,13 @@ export function toCdpKeyEvent(input: {
   if (modifiers & CTRL_ALT_META) text = undefined;
 
   const isDown = input.event === 'keydown';
+
+  // Ctrl only, and not with Alt: Ctrl+Alt+C is not a copy on any platform.
+  const ctrlOnly = (modifiers & 2) !== 0 && (modifiers & (1 | 4)) === 0;
+  const command = ctrlOnly ? EDIT_COMMANDS[code] : undefined;
+  // Shift+Ctrl+Z is redo everywhere except a few editors; treat it as redo.
+  const resolved = command === 'undo' && modifiers & 8 ? 'redo' : command;
+
   return {
     // rawKeyDown for anything that inserts nothing - Chromium ignores keyDown
     // without text for editing keys in some paths.
@@ -134,5 +164,8 @@ export function toCdpKeyEvent(input: {
     autoRepeat: input.repeat,
     isKeypad: input.location === 3 || special?.keypad === true,
     ...(isDown && text ? { text, unmodifiedText: printable ? key.toLowerCase() : text } : {}),
+    // Only on the way down: running the command again on key-up would copy or
+    // paste twice.
+    ...(isDown && resolved ? { commands: [resolved] } : {}),
   };
 }

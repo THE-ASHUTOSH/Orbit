@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { MOD, remoteModifiers, shortcutForKey } from '@orbit/protocol';
 import { toCdpKeyEvent } from '../browser/keymap.js';
 
 const down = (over: Partial<Parameters<typeof toCdpKeyEvent>[0]>) =>
@@ -64,4 +65,84 @@ test('keymap: keyup never carries text', () => {
   const e = toCdpKeyEvent({ event: 'keyup', key: 'a', code: 'KeyA', location: 0, repeat: false, modifiers: 0 });
   assert.equal(e.type, 'keyUp');
   assert.equal(e.text, undefined);
+});
+
+// --- accelerators ----------------------------------------------------------
+
+test('keymap: Ctrl+C, Ctrl+V, Ctrl+X and Ctrl+A carry the editing command', () => {
+  /**
+   * The regression this pins: a key event alone does nothing for these.
+   * Chromium resolves them in the browser process from real OS input, so an
+   * injected event needs `commands` or the page never copies, pastes or selects.
+   */
+  const chord = (code: string, modifiers: number = MOD.ctrl) =>
+    toCdpKeyEvent({ event: 'keydown', key: code.slice(3).toLowerCase(), code, location: 0, repeat: false, modifiers });
+
+  assert.deepEqual(chord('KeyC').commands, ['copy']);
+  assert.deepEqual(chord('KeyV').commands, ['paste']);
+  assert.deepEqual(chord('KeyX').commands, ['cut']);
+  assert.deepEqual(chord('KeyA').commands, ['selectAll']);
+  assert.deepEqual(chord('KeyZ').commands, ['undo']);
+  assert.deepEqual(chord('KeyZ', MOD.ctrl | MOD.shift).commands, ['redo'], 'Shift+Ctrl+Z is redo');
+  // No text with a modifier held: a command must not also type a letter.
+  assert.equal(chord('KeyC').text, undefined);
+});
+
+test('keymap: an editing command is sent once, on the way down only', () => {
+  const up = toCdpKeyEvent({ event: 'keyup', key: 'c', code: 'KeyC', location: 0, repeat: false, modifiers: MOD.ctrl });
+  assert.equal(up.commands, undefined, 'a command on key-up would copy twice');
+});
+
+test('keymap: a letter with no Ctrl, or with Alt or Meta, is not an editing command', () => {
+  const plain = (modifiers: number) =>
+    toCdpKeyEvent({ event: 'keydown', key: 'c', code: 'KeyC', location: 0, repeat: false, modifiers });
+  assert.equal(plain(0).commands, undefined);
+  assert.equal(plain(MOD.alt).commands, undefined);
+  // Meta is the Super key on the remote Linux browser, not an accelerator.
+  assert.equal(plain(MOD.meta).commands, undefined);
+  assert.equal(plain(MOD.ctrl | MOD.alt).commands, undefined, 'Ctrl+Alt+C is not a copy');
+});
+
+test('modifiers: a Mac viewer\'s Command becomes Ctrl for the remote browser', () => {
+  const cmdC = { altKey: false, ctrlKey: false, metaKey: true, shiftKey: false };
+  // On a Mac, Command means "accelerator"; the browser being driven is Linux,
+  // where Meta is the Super key and does nothing.
+  assert.equal(remoteModifiers(cmdC, true), MOD.ctrl);
+  assert.equal(remoteModifiers(cmdC, false), MOD.meta, 'elsewhere Meta stays Meta');
+  // Other modifiers ride along untouched.
+  assert.equal(
+    remoteModifiers({ altKey: false, ctrlKey: false, metaKey: true, shiftKey: true }, true),
+    MOD.ctrl | MOD.shift,
+  );
+  assert.equal(
+    remoteModifiers({ altKey: false, ctrlKey: true, metaKey: true, shiftKey: false }, true),
+    MOD.ctrl,
+    'Ctrl+Command collapses to one Ctrl',
+  );
+});
+
+test('shortcuts: Alt chords are matched by physical key, so they work on macOS', () => {
+  // What a Mac actually delivers: Option+T is "†", Option+W "∑", Option+1 "¡".
+  assert.equal(shortcutForKey({ code: 'KeyT', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }), 'newTab');
+  assert.equal(
+    shortcutForKey({ code: 'KeyT', altKey: true, ctrlKey: false, metaKey: false, shiftKey: true }),
+    'reopenTab',
+  );
+  assert.equal(shortcutForKey({ code: 'KeyW', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }), 'closeTab');
+  assert.equal(
+    shortcutForKey({ code: 'KeyD', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }),
+    'focusAddress',
+  );
+  assert.equal(
+    shortcutForKey({ code: 'Digit3', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }),
+    'selectTab:3',
+  );
+  assert.equal(shortcutForKey({ code: 'ArrowLeft', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }), 'back');
+});
+
+test('shortcuts: nothing without Alt, and nothing when Ctrl or Command is also held', () => {
+  assert.equal(shortcutForKey({ code: 'KeyT', altKey: false, ctrlKey: false, metaKey: false, shiftKey: false }), null);
+  assert.equal(shortcutForKey({ code: 'KeyT', altKey: true, ctrlKey: true, metaKey: false, shiftKey: false }), null);
+  assert.equal(shortcutForKey({ code: 'KeyT', altKey: true, ctrlKey: false, metaKey: true, shiftKey: false }), null);
+  assert.equal(shortcutForKey({ code: 'KeyQ', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }), null);
 });
