@@ -330,6 +330,18 @@ that actually work through a stream.
   the viewer's own browser fires its `paste` event and the text comes from the
   clipboard the user actually copied into.
 
+- **Keyboard capture, per tab, opt-in.** The chords the host browser reserves can
+  be reclaimed after all, but only through the Keyboard Lock API, and only on its
+  terms: fullscreen, a user gesture to enter it, and a secure context (so plain
+  http on a LAN IP does not qualify - `navigator.keyboard` is absent there, which
+  is measured, and the UI says so rather than pretending). Since capture takes
+  both the screen and every chord, it is a toggle rather than a mode Orbit
+  chooses for you, and it is scoped to one tab: switching tabs hands the keyboard
+  back. The way out cannot be one of the host's chords, so it is `Alt+K` plus an
+  on-screen badge. With it on, `⌘T` reaches the remote browser and opens a real
+  tab there - which Orbit adopts, redirected from `chrome://newtab` to the same
+  home page the "+" button uses.
+
 **Tradeoffs.** The shortcuts are not the ones muscle memory expects, which is
 why they are listed in the README and in the menu. Copy from the page uses the
 selection the probe already reported rather than a synthetic `Ctrl+C`, and paste

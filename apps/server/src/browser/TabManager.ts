@@ -380,6 +380,19 @@ export class TabManager extends EventEmitter {
     }
 
     await this.setupPage(tab);
+
+    /**
+     * A tab Chromium opened for itself starts on its own new-tab page. That
+     * happens when a captured Ctrl/⌘+T reaches the remote browser, and
+     * chrome://newtab is not a page a user of Orbit asked for - send it to the
+     * same home page the "+" button uses, so both routes behave alike.
+     */
+    if (isNewPopup && /^chrome:\/\/(newtab|new-tab-page)/.test(tab.url)) {
+      await this.cdp!.send('Page.navigate', { url: resolveTabUrl(null, config.homeUrl) }, sessionId).catch((err) =>
+        log.warn('new-tab redirect failed', { tabId, err }),
+      );
+    }
+
     this.emit('tab.created', tab);
   }
 

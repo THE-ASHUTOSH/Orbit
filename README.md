@@ -104,7 +104,7 @@ panel is also where anyone opens an extension's popup or options page.
 
 | Command | What it does |
 |---|---|
-| `./orbit test` | full suite: 98 tests, including real-Chromium integration |
+| `./orbit test` | full suite: 101 tests, including real-Chromium integration |
 | `./orbit bench [users] [tabs] [secs]` | latency and throughput benchmark |
 | `./orbit dev` | run from source without Docker (API `:3030`, Vite `:5173`) |
 | `npm run typecheck` | TypeScript across every workspace |
@@ -202,10 +202,25 @@ tab" on macOS, where it types "†".
 | `Alt+←` / `Alt+→` | Back / forward |
 | `F5`, `Ctrl+R` | Reload |
 | `Ctrl+±`, `Ctrl+0` | Zoom in/out, reset |
+| `Alt+K` | Capture the keyboard for this tab (see below) |
 
-One caveat that is not Orbit's to fix: a chord your *own* browser reserves
-(`⌘⇧H` is Home in Chrome, for instance) never reaches the page, so an extension
-bound to one of those needs rebinding to something free.
+**Keyboard capture** — `Alt+K`, or **⋮ → Capture keyboard**, for the chords your
+own browser normally keeps: `⌘T`, `⌘W`, `⌘L`, `⌘1`…`⌘9`, `Escape`. While it is on,
+those go to the shared browser instead: `⌘T` opens a tab *in Orbit*, `⌘W` closes
+one there, and an extension bound to `⌘⇧H` finally gets its key.
+
+It is **per tab**, not per session — switching tabs hands the keyboard straight
+back, because capture also takes the screen. `Alt+K` or the on-screen badge
+releases it, and so does leaving fullscreen.
+
+Two conditions come from the browser, not from Orbit:
+
+- it needs **fullscreen** (that is what the Keyboard Lock API requires), which is
+  why the toggle takes the whole screen;
+- it needs a **secure context**, so full capture works on `http://127.0.0.1:3030`
+  and behind TLS, but *not* over plain http on a LAN IP — `navigator.keyboard`
+  simply does not exist there. Orbit says so when that happens and still claims
+  every chord a page is allowed to claim (`⌘R`, `⌘S`, `⌘P`, `⌘F`, `⌘D`…).
 
 **Extensions.** An extensions panel in the ⋮ menu lists what is installed and
 opens an extension's popup or options page. Admins install by pasting a **Chrome
@@ -376,7 +391,7 @@ About 9,000 lines of TypeScript and 1,800 lines of documentation.
 
 ## Tests
 
-`./orbit test` runs **98 tests**, including an integration suite against a real
+`./orbit test` runs **101 tests**, including an integration suite against a real
 Chromium:
 
 - **unit** — scrypt hashing and timing, session cookie signing and tampering, the
@@ -386,7 +401,10 @@ Chromium:
   assignment never repeating, stream backpressure and keyframes, bookmark and
   history upserts (visits accumulate, an empty title never erases a known one,
   suggestions ranked by visits then recency, `%` matched literally), extension id
-  derivation, and `.crx` unwrapping (CRX2, CRX3, a truncated header refused).
+  derivation, `.crx` unwrapping (CRX2, CRX3, a truncated header refused), the
+  editing commands `Ctrl+C/V/X/A` need, the shortcut map against the key values a
+  Mac actually produces (Option+T is `†`), and Chromium's argv — no switch passed
+  twice, since a duplicate `--disable-features` silently discards the first list.
 - **arbiter** — input never crosses tabs, three users on one tab are serialised in
   arrival order, duplicate `eventId` and replayed `clientSequence` are dropped,
   per-connection sequence spaces, coordinate clamping, IME/touch/wheel dispatch.
@@ -409,8 +427,9 @@ Chromium:
 (two independent contexts standing in for two machines): sign-in, streaming and
 live pixels, tab create/switch/close, bookmarking a page and finding it in the
 panel, address-bar suggestions from history, the right-click menu,
-`Alt+T`/`Alt+W`, and a copy-and-paste round trip through the accelerator key. It
-is opt-in because Playwright downloads browser binaries:
+`Alt+T`/`Alt+W`, a copy-and-paste round trip through the accelerator key, and the
+per-tab keyboard capture toggle. It is opt-in because Playwright downloads
+browser binaries:
 
 ```bash
 npm i -D @playwright/test && npx playwright install chromium

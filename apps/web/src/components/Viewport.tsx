@@ -40,6 +40,9 @@ interface Props {
   onZoom: (zoom: number) => void;
   /** Returns true when the shortcut was handled locally and must not be forwarded. */
   onShortcut: (action: string) => boolean;
+  /** Non-null while this tab holds the keyboard; 'partial' when only some of it. */
+  captured: 'locked' | 'partial' | null;
+  onReleaseCapture: () => void;
   /** Page coordinates for the probe, screen coordinates for placement. */
   onContextMenu: (pageX: number, pageY: number, screenX: number, screenY: number) => void;
 }
@@ -65,6 +68,8 @@ export function Viewport({
   selfUserId,
   onZoom,
   onShortcut,
+  captured,
+  onReleaseCapture,
   onContextMenu,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -437,6 +442,18 @@ export function Viewport({
             }
           }}
         />
+
+        {/* While the keyboard is captured, say so and offer the way out - the
+            usual one (this browser's own chords) is exactly what is unavailable. */}
+        {captured && (
+          <button
+            onClick={onReleaseCapture}
+            title="Release the keyboard (Alt+K)"
+            className="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-line-2 bg-panel/90 px-3 py-1 text-[11px] text-ink-2 shadow-lg backdrop-blur hover:bg-elev"
+          >
+            ⌨ Keyboard captured{captured === 'partial' ? ' (partly)' : ''} · Alt+K to release
+          </button>
+        )}
 
         {/* Other users' cursors, drawn client-side over the frame. */}
         {overlayCursors.map((c) => (

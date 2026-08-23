@@ -306,11 +306,19 @@ test.describe('orbit UI', () => {
     await expect.poll(() => canvasHasContent(page), { timeout: 30_000 }).toBe(true);
 
     // Copy: select the remote page and copy it; the text must arrive here.
+    // Chord and read together in the poll - one attempt can land before the page
+    // has anything selectable, and retrying the read alone would never recover.
     await stage(page).click({ position: { x: 200, y: 200 } });
-    await page.keyboard.press('ControlOrMeta+a');
-    await page.keyboard.press('ControlOrMeta+c');
     await expect
-      .poll(() => page.evaluate(() => navigator.clipboard.readText().catch(() => '')), { timeout: 15_000 })
+      .poll(
+        async () => {
+          await page.keyboard.press('ControlOrMeta+a');
+          await page.keyboard.press('ControlOrMeta+c');
+          await page.waitForTimeout(400);
+          return page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+        },
+        { timeout: 20_000 },
+      )
       .toContain('repaints:');
 
     // Paste: put a known string on this machine's clipboard and paste it into
@@ -337,6 +345,48 @@ test.describe('orbit UI', () => {
         { timeout: 20_000 },
       )
       .toContain(marker);
+  });
+
+  test('keyboard capture is a per-tab toggle', async ({ page }) => {
+    /**
+     * Capture exists so this browser stops eating ⌘T/⌘W and the remote browser
+     * gets them instead. Whether those specific chords arrive can only be
+     * checked by a human pressing them - a synthetic key event was never going
+     * to be intercepted by the host in the first place. What is checked here is
+     * the machinery: the lock is taken, it is scoped to one tab, and there is a
+     * way out that does not need the host's own shortcuts.
+     */
+    await signIn(page);
+    const captured = page.getByRole('button', { name: /Keyboard captured/ });
+    const fullscreen = () => page.evaluate(() => !!document.fullscreenElement);
+
+    await page.getByRole('button', { name: 'Menu' }).click();
+    await page.getByRole('menuitem', { name: /Capture keyboard/ }).click();
+
+    await expect(captured).toBeVisible();
+    // 127.0.0.1 is a secure context, so the real lock is available here.
+    await expect(captured).not.toContainText('partly');
+    expect(await fullscreen()).toBe(true);
+
+    // Switching tabs hands the keyboard back: capture is per tab.
+    await page.getByRole('button', { name: 'New tab' }).click();
+    const tabs = page.locator('div[title*="tab_"]');
+    await tabs.last().click();
+    await expect(captured).toHaveCount(0);
+    // Polled, not read once: the badge goes as soon as state changes, while
+    // handing the screen back is a promise that settles a tick later.
+    await expect.poll(fullscreen, { timeout: 5_000 }).toBe(false);
+
+    // Alt+K takes it and gives it back, without touching the host's chords.
+    await stage(page).click({ position: { x: 60, y: 60 } });
+    await page.keyboard.press('Alt+k');
+    await expect(captured).toBeVisible();
+    await page.keyboard.press('Alt+k');
+    await expect(captured).toHaveCount(0);
+
+    const last = tabs.last();
+    await last.hover();
+    await last.getByRole('button', { name: 'Close tab' }).click();
   });
 
   test('rejects a bad password without revealing whether the user exists', async ({ page }) => {

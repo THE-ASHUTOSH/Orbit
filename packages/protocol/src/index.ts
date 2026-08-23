@@ -467,6 +467,10 @@ export function shortcutForKey(e: {
   const digit = /^Digit([1-9])$/.exec(e.code)?.[1];
   if (digit) return `selectTab:${digit}`;
   switch (e.code) {
+    case 'KeyK':
+      // Keyboard capture. Alt+K works while captured too, which is what makes it
+      // a usable way out: the host browser's own chords are unavailable then.
+      return 'toggleCapture';
     case 'KeyT':
       return e.shiftKey ? 'reopenTab' : 'newTab';
     case 'KeyW':

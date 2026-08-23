@@ -117,6 +117,11 @@ export class BrowserManager extends EventEmitter {
     this.emit('status', s, message);
   }
 
+  /** Exposed for tests: the exact argv Chromium would be launched with. */
+  launchArgsForTest(): string[] {
+    return this.chromiumArgs();
+  }
+
   private chromiumArgs(): string[] {
     const args = [
       `--remote-debugging-port=${config.cdpPort}`,
@@ -132,14 +137,21 @@ export class BrowserManager extends EventEmitter {
       '--use-mock-keychain',
       '--force-color-profile=srgb',
       '--autoplay-policy=no-user-gesture-required',
-      '--disable-features=Translate,MediaRouter,OptimizationHints,AcceptCHFrame',
-      // These four are load-bearing for the product: without them Chromium
-      // throttles or stops compositing tabs that are not in the foreground, and
-      // users on other tabs would see a frozen stream.
+      /**
+       * One --disable-features, not several.
+       *
+       * Chromium keeps only the last occurrence of a switch, so passing this
+       * flag twice silently threw the first list away - which is how
+       * CalculateNativeWinOcclusion ended up as the only thing disabled here,
+       * and Translate and friends came back.
+       */
+      '--disable-features=Translate,MediaRouter,OptimizationHints,AcceptCHFrame,CalculateNativeWinOcclusion',
+      // Load-bearing for the product: without these Chromium throttles or stops
+      // compositing tabs that are not in the foreground, and users on other tabs
+      // would see a frozen stream.
       '--disable-background-timer-throttling',
       '--disable-backgrounding-occluded-windows',
       '--disable-renderer-backgrounding',
-      '--disable-features=CalculateNativeWinOcclusion',
       // We deliberately send high-rate input over CDP.
       '--disable-ipc-flooding-protection',
       // Chromium's initial page is adopted as the first tab, so start it on the

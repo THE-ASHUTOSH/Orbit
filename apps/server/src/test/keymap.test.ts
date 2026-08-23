@@ -138,6 +138,12 @@ test('shortcuts: Alt chords are matched by physical key, so they work on macOS',
     'selectTab:3',
   );
   assert.equal(shortcutForKey({ code: 'ArrowLeft', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }), 'back');
+  // The way out of keyboard capture: while captured, this browser's own chords
+  // are exactly what is unavailable, so this one must not depend on `key` either.
+  assert.equal(
+    shortcutForKey({ code: 'KeyK', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }),
+    'toggleCapture',
+  );
 });
 
 test('shortcuts: nothing without Alt, and nothing when Ctrl or Command is also held', () => {

@@ -27,6 +27,9 @@ interface Props {
   onCycleTheme: () => void;
   showMetrics: boolean;
   onToggleMetrics: () => void;
+  captured: boolean;
+  captureMode: 'locked' | 'partial' | null;
+  onToggleCapture: () => void;
   bookmarkCount: number;
   onOpenBookmarks: () => void;
   onOpenHistory: () => void;
@@ -52,6 +55,9 @@ export function Menu({
   onCycleTheme,
   showMetrics,
   onToggleMetrics,
+  captured,
+  captureMode,
+  onToggleCapture,
   bookmarkCount,
   onOpenBookmarks,
   onOpenHistory,
@@ -112,6 +118,19 @@ export function Menu({
           <Item onClick={run(onNewTab)}>New tab</Item>
           <Item onClick={run(onDuplicateTab)} disabled={!canControl}>
             Duplicate tab
+          </Item>
+
+          <Divider />
+          {/* Not `run`: capture needs the click itself as its user gesture, and
+              closing the menu first would take the focus with it. */}
+          <Item
+            onClick={() => {
+              setOpen(false);
+              onToggleCapture();
+            }}
+            hint={captured ? (captureMode === 'locked' ? 'on' : 'partial') : 'off'}
+          >
+            Capture keyboard · Alt+K
           </Item>
 
           <Divider />

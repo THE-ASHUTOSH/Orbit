@@ -28,6 +28,7 @@ import { BookmarksPanel, HistoryPanel } from './components/BookmarksPanel';
 import { ContextMenu, type ContextTarget } from './components/ContextMenu';
 import { ExtensionsPanel } from './components/ExtensionsPanel';
 import { useTheme } from './lib/theme';
+import { captureKeyboard, releaseKeyboard, fullCaptureAvailable, type CaptureMode } from './lib/keyboard';
 
 export function App() {
   const [self, setSelf] = useState<SelfUser | null>(null);
@@ -67,6 +68,14 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
   const [history, setHistory] = useState<{ url: string; title: string; at: number; visits: number }[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showExtensions, setShowExtensions] = useState(false);
+  /**
+   * Which tab is holding the keyboard, if any.
+   *
+   * Per tab, not per session: capture takes the screen and every chord, which is
+   * right while you are working in one page and wrong the moment you switch. One
+   * tab at a time, because fullscreen is a property of the document.
+   */
+  const [capture, setCapture] = useState<{ tabId: string; mode: CaptureMode } | null>(null);
   /** Set when the server answers a right-click probe. */
   const [context, setContext] = useState<ContextTarget | null>(null);
   /** Where the pending right-click happened on screen, for menu placement. */
@@ -318,6 +327,53 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
   };
 
   /**
+   * Take or release the keyboard for the current tab.
+   *
+   * Must run inside the user's gesture (the menu click, or the Alt+K keypress):
+   * that is the only moment fullscreen may be requested, and the Keyboard Lock
+   * API only applies while fullscreen.
+   */
+  const toggleCapture = () => {
+    if (!activeTabId) return;
+    if (capture) {
+      void releaseKeyboard();
+      setCapture(null);
+      return;
+    }
+    void captureKeyboard(document.documentElement).then((mode) => {
+      setCapture({ tabId: activeTabId, mode });
+      if (mode === 'partial') {
+        setToast(
+          fullCaptureAvailable()
+            ? 'Keyboard partly captured: fullscreen was refused, so this browser still keeps ⌘T and ⌘W.'
+            : 'Keyboard partly captured: taking ⌘T and ⌘W needs https or 127.0.0.1, so this browser keeps them.',
+        );
+      }
+    });
+  };
+
+  /** Capture belongs to one tab: switching tabs ends it. */
+  useEffect(() => {
+    if (capture && capture.tabId !== activeTabId) {
+      void releaseKeyboard();
+      setCapture(null);
+    }
+  }, [capture, activeTabId]);
+
+  /** Leaving fullscreen by any route (Esc, F11, the OS) also ends capture. */
+  useEffect(() => {
+    if (!capture) return;
+    const onFullscreen = () => {
+      if (!document.fullscreenElement) {
+        void releaseKeyboard();
+        setCapture(null);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => document.removeEventListener('fullscreenchange', onFullscreen);
+  }, [capture]);
+
+  /**
    * Send a modifier chord to the page. The remote Chromium handles the editing
    * command itself, the way it would for a local keypress.
    *
@@ -347,6 +403,9 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
       return !!target;
     }
     switch (action) {
+      case 'toggleCapture':
+        toggleCapture();
+        return true;
       case 'newTab':
         if (!canCreate) return false;
         socket.send({ type: 'tab.create' });
@@ -435,6 +494,9 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
             onCycleTheme={cycleTheme}
             showMetrics={showMetrics}
             onToggleMetrics={() => setShowMetrics((v) => !v)}
+            captured={!!capture}
+            captureMode={capture?.mode ?? null}
+            onToggleCapture={toggleCapture}
             bookmarkCount={bookmarks.length}
             onOpenBookmarks={() => {
               setShowBookmarks(true);
@@ -462,6 +524,8 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
             cursors={cursors[activeTab.tabId] ?? []}
             selfUserId={self.userId}
             onShortcut={onShortcut}
+            captured={capture?.tabId === activeTab.tabId ? capture.mode : null}
+            onReleaseCapture={toggleCapture}
             onContextMenu={(pageX, pageY, screenX, screenY) => {
               contextAt.current = { x: screenX, y: screenY };
               socket.send({ type: 'context.probe', tabId: activeTab.tabId, x: pageX, y: pageY });
