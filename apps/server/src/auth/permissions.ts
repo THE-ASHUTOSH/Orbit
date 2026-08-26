@@ -4,7 +4,7 @@
  */
 import { ROLE_RANK, permits, type Role, type TabPermission } from '@orbit/protocol';
 import { config } from '../config.js';
-import { getTabGrant } from '../db.js';
+import { getTabGrant, tabOwner } from '../db.js';
 
 export type Capability =
   | 'tab.create'
@@ -37,6 +37,8 @@ export const roleCan = (role: Role, cap: Capability): boolean => ROLE_CAPS[role]
  * Effective permission of a user on a tab:
  *   admin role            -> admin on everything
  *   explicit grant        -> that grant
+ *   owner of the tab      -> admin on it (so they can hand control out)
+ *   someone else's tab    -> view  (TAB_OWNERSHIP, the default)
  *   otherwise             -> DEFAULT_TAB_PERMISSION for `user`, view for `viewer`
  * A viewer is then capped at 'view' whatever the grant says, so "viewer cannot
  * send input" holds even if someone grants them control by mistake.
@@ -48,7 +50,14 @@ export function effectivePermission(
   if (user.role === 'admin') return 'admin';
   const grant = getTabGrant(tabId, user.id);
   if (user.role === 'viewer') return 'view';
-  return grant ?? config.defaultTabPermission;
+  if (grant) return grant;
+  if (config.tabOwnership) {
+    const owner = tabOwner(tabId);
+    // 'admin' rather than 'control': the owner is who grants access to others,
+    // and that is a tab-admin capability.
+    if (owner) return owner === user.id ? 'admin' : 'view';
+  }
+  return config.defaultTabPermission;
 }
 
 export function canControlTab(user: { id: string; role: Role }, tabId: string): boolean {

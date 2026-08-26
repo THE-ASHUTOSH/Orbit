@@ -10,12 +10,28 @@ interface Props {
   onResetZoom: () => void;
   bookmarked: boolean;
   onToggleBookmark: () => void;
+  /** Set when this tab belongs to someone else and control could be asked for. */
+  ownerName: string | null;
+  requestPending: boolean;
+  onRequestControl: () => void;
   onNavigate: (url: string) => void;
   onAction: (action: 'reload' | 'back' | 'forward' | 'stop' | 'duplicate') => void;
 }
 
 export const Toolbar = forwardRef<HTMLInputElement, Props>(function Toolbar(
-  { tab, canControl, menu, onResetZoom, bookmarked, onToggleBookmark, onNavigate, onAction },
+  {
+    tab,
+    canControl,
+    menu,
+    onResetZoom,
+    bookmarked,
+    onToggleBookmark,
+    ownerName,
+    requestPending,
+    onRequestControl,
+    onNavigate,
+    onAction,
+  },
   addressRef,
 ) {
   const disabled = !tab || !canControl;
@@ -37,6 +53,21 @@ export const Toolbar = forwardRef<HTMLInputElement, Props>(function Toolbar(
       </ToolButton>
 
       <AddressBar ref={addressRef} url={tab?.url ?? ''} disabled={disabled} onNavigate={onNavigate} />
+
+      {/* Someone else's tab: say whose, and offer to ask them. */}
+      {ownerName && (
+        <button
+          onClick={onRequestControl}
+          disabled={requestPending}
+          title={`${ownerName} owns this tab - ask for control of it`}
+          // Stable name, changing text: the label is what this button *is*, and
+          // "waiting for an answer" is a state of it, not a different control.
+          aria-label={`Ask ${ownerName} for control`}
+          className="shrink-0 rounded-full border border-line-2 px-2 py-0.5 text-[11px] text-ink-2 hover:bg-elev disabled:opacity-50"
+        >
+          {requestPending ? `Asked ${ownerName}…` : `Ask ${ownerName} for control`}
+        </button>
+      )}
 
       <button
         onClick={onToggleBookmark}

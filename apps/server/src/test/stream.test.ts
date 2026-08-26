@@ -162,8 +162,45 @@ test('stream: a screencast that is refused while the page is still attaching is 
   assert.equal(cdp.sent.filter((s) => s.method === 'Page.startScreencast').length, 1, 'the retry succeeded');
   assert.equal(cdp.refusals, 0, 'both refusals were seen');
 
-  // And the stream really is live: a frame from Chromium reaches the subscriber.
-  cdp.emit('event', frameEvent('sess-1'));
+  // And the stream really is live: a screencast frame - not just the keyframe
+  // every subscriber gets - reaches the subscriber.
+  const beforeFrame = a.received.length;
+  cdp.emit('Page.screencastFrame', frameEvent('sess-1'));
   await new Promise((r) => setTimeout(r, 10));
-  assert.ok(a.received.length >= 1, 'frames flow after the retry');
+  assert.ok(a.received.length > beforeFrame, 'frames flow after the retry');
+});
+
+test('stream: a viewer who joins while the viewport is resizing keeps getting frames', async () => {
+  /**
+   * The bug this pins: restart() used to snapshot the sinks, await the stop, and
+   * then write a fresh state back - discarding anyone who subscribed in between.
+   * They received their keyframe and then nothing, which looked exactly like a
+   * frozen tab for the second person to open it.
+   */
+  class SlowStop extends FakeCdp {
+    override async send(method: string, params?: unknown, sessionId?: string) {
+      if (method === 'Page.stopScreencast') await new Promise((r) => setTimeout(r, 60));
+      return super.send(method, params, sessionId);
+    }
+  }
+
+  const cdp = new SlowStop();
+  const streams = new StreamManager(fakeTabs().manager);
+  streams.attach(cdp as never);
+  const first = sink('first');
+  const joiner = sink('joiner');
+
+  await streams.subscribe('tab_01A', first);
+  const resizing = streams.restart('tab_01A');
+  await new Promise((r) => setTimeout(r, 15)); // land inside the stop window
+  await streams.subscribe('tab_01A', joiner);
+  await resizing;
+
+  assert.equal(streams.subscriberCount('tab_01A'), 2, 'both viewers are still subscribed');
+
+  const before = { first: first.received.length, joiner: joiner.received.length };
+  cdp.emit('Page.screencastFrame', frameEvent('sess-1'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(first.received.length > before.first, 'the original viewer still receives frames');
+  assert.ok(joiner.received.length > before.joiner, 'and so does the one who joined mid-resize');
 });

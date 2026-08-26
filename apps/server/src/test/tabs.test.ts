@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeUrl, resolveTabUrl } from '../browser/TabManager.js';
+import { EventEmitter } from 'node:events';
+import { normalizeUrl, resolveTabUrl, TabManager } from '../browser/TabManager.js';
+import { config } from '../config.js';
+import { openInMemoryForTests } from '../db.js';
+import { errorCode } from '../ws/hub.js';
 
 test('urls: bare hostnames become https', () => {
   assert.equal(normalizeUrl('example.com'), 'https://example.com/');
@@ -44,4 +48,75 @@ test('urls: a new tab falls back to the configured home page', () => {
   assert.equal(resolveTabUrl(undefined, ''), 'about:blank', 'empty home is not a navigation');
   // A home page that is not a usable http(s) URL must not break tab creation.
   assert.equal(resolveTabUrl(undefined, 'file:///etc/passwd'), 'about:blank');
+});
+
+/**
+ * A Chromium that behaves like the real one in the way that matters here: a new
+ * target's session arrives *after* createTarget has returned, which is the gap
+ * the tab limit has to survive.
+ */
+class FakeBrowserCdp extends EventEmitter {
+  connected = true;
+  private created = 0;
+
+  async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    if (method === 'Target.getTargets') return { targetInfos: [] };
+    if (method === 'Target.createTarget') {
+      const targetId = `target-${++this.created}`;
+      setTimeout(
+        () =>
+          this.emit('Target.attachedToTarget', {
+            params: {
+              sessionId: `session-${targetId}`,
+              targetInfo: { targetId, type: 'page', url: String(params?.url ?? 'about:blank'), title: '' },
+            },
+          }),
+        5,
+      );
+      return { targetId };
+    }
+    return {};
+  }
+  post(): void {}
+}
+
+test('tabs: a burst of creates cannot exceed MAX_TABS', async () => {
+  /**
+   * A tab only appears in the manager once Chromium attaches its session, so a
+   * limit checked against that map alone is no limit under concurrency: every
+   * request in a burst passes before any of them has registered. Measured with
+   * the stress harness before this was fixed - 24 tabs against a cap of 20.
+   */
+  openInMemoryForTests();
+  const cdp = new FakeBrowserCdp();
+  const tabs = new TabManager({ browserId: 'brw_test' } as never);
+  await tabs.attach(cdp as never);
+
+  const room = config.maxTabs - tabs.count;
+  const attempts = room + 6;
+  const results = await Promise.allSettled(
+    Array.from({ length: attempts }, () => tabs.createTab({ createdBy: null })),
+  );
+  const created = results.filter((r) => r.status === 'fulfilled').length;
+  const refused = results.filter(
+    (r) => r.status === 'rejected' && (r.reason as Error).message === 'tab_limit',
+  ).length;
+
+  assert.ok(tabs.count <= config.maxTabs, `${tabs.count} tabs open against a limit of ${config.maxTabs}`);
+  assert.equal(created, room, `all the room available was used (${created}/${room})`);
+  assert.equal(refused, 6, 'and the overflow was refused with tab_limit, not silently dropped');
+});
+
+test('errors: losing a race with a closing tab is reported as tab_not_found', () => {
+  // Chromium's phrasing when the page went away mid-request. Reporting these as
+  // "internal" told the user something was broken and filled the log with
+  // errors, when the truthful answer is that the tab is gone.
+  assert.equal(errorCode(new Error('Session with given id not found.')), 'tab_not_found');
+  assert.equal(errorCode(new Error('No target with given id found')), 'tab_not_found');
+  assert.equal(errorCode(new Error('Target closed')), 'tab_not_found');
+  // Codes the server raises itself still pass through unchanged...
+  assert.equal(errorCode(new Error('tab_limit')), 'tab_limit');
+  assert.equal(errorCode(new Error('forbidden')), 'forbidden');
+  // ...and a genuine surprise is still internal, so real bugs stay visible.
+  assert.equal(errorCode(new Error('TypeError: x is not a function')), 'internal');
 });

@@ -380,3 +380,47 @@ sessions. The unpacked copy also gets a path-derived id rather than its store id
 (the store id lives in the signed header we discard), so an extension that
 hardcodes its own id - OAuth redirect URIs, mostly - can misbehave. Those are the
 cases where the zip route, or not installing it at all, is the right call.
+
+---
+
+## 10. Who a tab belongs to
+
+**Problem.** "Several people, one browser" was built so that anybody could drive
+anything - which is right for two people looking at one screen together, and
+wrong the moment someone is filling in a form, reading their mail, or typing a
+password while a colleague's cursor is in the same tab. A shared browser needs a
+notion of *whose tab this is*.
+
+**Options considered.** A per-tab lock with a timeout (whoever touched it last
+holds it, which turns into a race every time two people move at once); a
+first-come "driver" role that has to be explicitly released (someone always
+forgets, and then nobody can work); or ownership by the act of opening the tab,
+with an explicit hand-over.
+
+**Chosen:** the tab belongs to whoever opened it, and control is something they
+give away.
+
+- Opening a tab is the claim: the `+` button carries the requester, and a tab a
+  page opened is attributed to whoever was last driving the tab that opened it -
+  the same attribution that already decided whose view follows a new tab.
+- The owner's effective permission on that tab is `admin`, not `control`, because
+  handing control to someone else is a tab-admin act. Everyone else is `view`.
+  An explicit grant still wins, so an admin can fix any situation.
+- Closing and renaming go with ownership too. Refusing input while still letting
+  a bystander close the tab would be a strange kind of protection.
+- Asking is a message, not a side channel: `tab.access.request` reaches the
+  owner's connections wherever they happen to be looking - and admins when the
+  owner is offline, so a request is always answerable - and their
+  `tab.access.respond` writes a real per-tab grant. A pending request is
+  suppressed for 30 seconds, so a refusal cannot be turned into a stream of
+  prompts.
+- Granting takes effect immediately: the server pushes the new `tab.permissions`
+  to that user, so nothing needs reloading or re-subscribing.
+
+**Tradeoffs.** This is a change of default, so `TAB_OWNERSHIP=false` keeps the
+old behaviour for groups who preferred it. Tabs that predate the feature - and
+the browser's own first tab - have no owner and stay shared; there is a test for
+that, because silently locking existing tabs to nobody would be worse than
+leaving them open. And ownership is not privacy: everyone can still *see* every
+tab, which is the point of a shared browser. Anyone who needs a page nobody else
+can read needs their own browser, not a grant in this one.

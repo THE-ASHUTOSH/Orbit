@@ -336,6 +336,34 @@ export const getTabRow = (tabId: string) =>
 
 // --- tab permissions -------------------------------------------------------
 
+/**
+ * Who owns a tab, cached.
+ *
+ * Asked on every input event through canControlTab, so it must not be a query
+ * each time. Safe to cache without invalidation: a tab's owner is set when the
+ * tab is created and never changes, and ids are never reused. Only non-null
+ * answers are cached, so a tab asked about before its row exists is re-read.
+ */
+const ownerCache = new Map<string, string>();
+
+export function tabOwner(tabId: string): string | null {
+  const cached = ownerCache.get(tabId);
+  if (cached) return cached;
+  const row = db.prepare('SELECT created_by FROM tabs WHERE id = ?').get(tabId) as { created_by: string | null } | undefined;
+  if (row?.created_by) ownerCache.set(tabId, row.created_by);
+  return row?.created_by ?? null;
+}
+
+/**
+ * Claim a tab Chromium opened for us. Used when a popup or a captured Ctrl+T
+ * produced a tab that only the input arbiter can attribute - the row was already
+ * written with no owner by then.
+ */
+export function setTabOwner(tabId: string, userId: string): void {
+  db.prepare('UPDATE tabs SET created_by = ? WHERE id = ? AND created_by IS NULL').run(userId, tabId);
+  ownerCache.set(tabId, userId);
+}
+
 export const grantTab = (tabId: string, userId: string, permission: TabPermission) =>
   void db
     .prepare(

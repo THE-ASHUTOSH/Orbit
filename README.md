@@ -104,8 +104,9 @@ panel is also where anyone opens an extension's popup or options page.
 
 | Command | What it does |
 |---|---|
-| `./orbit test` | full suite: 101 tests, including real-Chromium integration |
+| `./orbit test` | full suite: 109 tests, including real-Chromium integration |
 | `./orbit bench [users] [tabs] [secs]` | latency and throughput benchmark |
+| `./orbit stress [users] [tabs]` | stress, races and abuse, with pass/fail invariants |
 | `./orbit dev` | run from source without Docker (API `:3030`, Vite `:5173`) |
 | `npm run typecheck` | TypeScript across every workspace |
 | `npm run build` | build protocol, server and web |
@@ -148,9 +149,19 @@ adopted automatically and appear for everyone. Every tab has a stable id
 **Simultaneous users, different tabs.** Input is routed by user + tab + session.
 Nothing crosses tabs — there is a test that proves it.
 
-**Simultaneous users, same tab.** No locking, no turn-taking. A per-tab
-server-side arbiter gives one authoritative order, coalesces mouse moves, and
-de-duplicates retries. Other people's cursors are drawn with their names.
+**Tabs belong to whoever opened them.** Press `+`, or click a link that opens a
+tab, and that tab is yours: you drive it, everyone else watches. They see whose it
+is and get one button — *Ask <name> for control* — which puts a prompt in front of
+you wherever you are looking, with **Give control** or **Keep it to myself**.
+Granting takes effect immediately, no reload. Nobody else can close or rename
+your tab either; control, once given, is permission to type, not to dispose of it.
+Set `TAB_OWNERSHIP=false` for the older free-for-all, where any tab is anyone's
+to drive.
+
+**Simultaneous users, same tab.** Once control is shared there is no locking and
+no turn-taking. A per-tab server-side arbiter gives one authoritative order,
+coalesces mouse moves, and de-duplicates retries. Other people's cursors are
+drawn with their names.
 
 **Real input.** Mouse move/down/up/click/double-click/right-click/wheel/drag,
 touch, full keyboard with modifiers and shortcuts, IME composition, and paste.
@@ -349,6 +360,7 @@ that matter most:
 | `EXTENSIONS_ENABLED` | `true` | extension loading |
 | `MAX_TABS` / `MAX_USERS` | `20` / `50` | resource ceilings |
 | `DEFAULT_TAB_PERMISSION` | `control` | `view` makes control opt-in per tab |
+| `TAB_OWNERSHIP` | `true` | a tab belongs to whoever opened it; others watch until granted control. `false` restores the shared free-for-all |
 | `MEMORY_LIMIT` / `CPU_LIMIT` | `4g` / `4.0` | container ceilings |
 
 `ADMIN_PASSWORD` seeds the admin **only when the user table is empty**, so an env
@@ -391,14 +403,16 @@ About 9,000 lines of TypeScript and 1,800 lines of documentation.
 
 ## Tests
 
-`./orbit test` runs **101 tests**, including an integration suite against a real
+`./orbit test` runs **109 tests**, including an integration suite against a real
 Chromium:
 
 - **unit** — scrypt hashing and timing, session cookie signing and tampering, the
-  role/grant permission matrix, the key map (Enter, Backspace, arrows, Ctrl+A,
+  role/grant/ownership permission matrix (the owner administers their tab, others
+  watch, an explicit grant wins, an unowned tab stays shared), the key map (Enter, Backspace, arrows, Ctrl+A,
   punctuation, numpad), URL scheme blocking, home-page resolution, frame codec
   round trip, mDNS packet encode/parse, stale profile-lock clearing, colour
-  assignment never repeating, stream backpressure and keyframes, bookmark and
+  assignment never repeating, stream backpressure, keyframes and the resize race
+  (a viewer joining while the viewport resizes must keep getting frames), bookmark and
   history upserts (visits accumulate, an empty title never erases a known one,
   suggestions ranked by visits then recency, `%` matched literally), extension id
   derivation, `.crx` unwrapping (CRX2, CRX3, a truncated header refused), the
@@ -415,29 +429,44 @@ Chromium:
   received; a third user joining the same tab and interleaving keystrokes with
   none lost; a viewer's input refused server-side; per-tab grants enforced;
   popups adopted; SPA title changes reported; cookies shared across the profile;
+  a tab owned by a plain user refusing someone else's input, that person asking,
+  the owner refusing and then granting, and control arriving without a
+  re-subscribe (plus: control is not permission to close the tab);
   a right-click probe finding the real anchor under the pointer (and nothing in
   empty space); a paste arriving in the page's focused field; Ctrl+A/C/V/X really
   selecting, copying, pasting and cutting in the page;
   one user disconnecting while another keeps working; reconnect restoring the
   previous tab; malformed and over-rate messages rejected; **`SIGKILL` on
   Chromium recovered with tab ids preserved and input working again**; graceful
-  shutdown notifying clients.
+  shutdown notifying clients; and login throttling that counts failures rather
+  than the people signing in.
+
+`./orbit stress` is the harness that answers a different question: not "how fast
+is it" but "what happens when it is pushed, raced, or broken". Nine scenarios,
+each reporting measured numbers **and** pass/fail invariants - normal load, heavy
+load, an escalating ladder to the declared limits, six people typing into one tab
+at once (verified through the page itself, keystroke by keystroke), ownership
+under contention, four deliberate races, limit and abuse handling, a two-minute
+soak, and a `SIGKILL` of Chromium mid-stream. Results are written to
+`bench/bench-results/stress-*.json`. See
+[performance.md](docs/performance.md#stress-and-abuse) for the measurements.
 
 `npm run test:e2e` additionally drives the UI in a real browser with Playwright
 (two independent contexts standing in for two machines): sign-in, streaming and
 live pixels, tab create/switch/close, bookmarking a page and finding it in the
 panel, address-bar suggestions from history, the right-click menu,
 `Alt+T`/`Alt+W`, a copy-and-paste round trip through the accelerator key, and the
-per-tab keyboard capture toggle. It is opt-in because Playwright downloads
-browser binaries:
+per-tab keyboard capture toggle, and the ownership flow end to end between two
+ordinary users. It is opt-in because Playwright downloads browser binaries:
 
 ```bash
 npm i -D @playwright/test && npx playwright install chromium
 ADMIN_PASSWORD=... npm run test:e2e
 ```
 
-Logins are rate-limited to 10 a minute per IP, so the suite signs in once and
-reuses the session for the rest - which is also why a full run takes seconds.
+Only *failed* logins are rate-limited (10 a minute per IP), so repeated runs are
+fine; the suite still signs in once and reuses the session, which is why a full
+run takes seconds.
 
 Both suites launch real browsers, so the assertions that wait on *pixels* are
 timing-sensitive: under load - or while Chromium is still coming up after a

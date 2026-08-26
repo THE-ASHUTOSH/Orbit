@@ -10,7 +10,16 @@ import type { TabInfo } from '@orbit/protocol';
 import { config } from '../config.js';
 import { log } from '../log.js';
 import { id } from '../ids.js';
-import { insertTab, listOpenTabs, markTabClosed, renameTab, updateTabMeta, updateTabTarget, audit } from '../db.js';
+import {
+  insertTab,
+  listOpenTabs,
+  markTabClosed,
+  renameTab,
+  setTabOwner,
+  updateTabMeta,
+  updateTabTarget,
+  audit,
+} from '../db.js';
 import type { BrowserManager } from './BrowserManager.js';
 import type { CdpConnection, CdpEvent } from './cdp.js';
 
@@ -92,6 +101,11 @@ export class TabManager extends EventEmitter {
    * onAttached waits on these so the reservation is always in place first.
    */
   private inflightCreates = new Set<Promise<unknown>>();
+  /**
+   * Creates that have passed the tab limit but do not yet appear in `tabs`.
+   * Without this the limit is a suggestion under any concurrency.
+   */
+  private pendingCreates = 0;
 
   constructor(private readonly browser: BrowserManager) {
     super();
@@ -122,8 +136,23 @@ export class TabManager extends EventEmitter {
       height: tab.height,
       zoom: tab.zoom,
       createdAt: tab.createdAt,
+      ownerId: tab.createdBy,
       viewers,
     };
+  }
+
+  /**
+   * Claim a tab for the user Chromium opened it for.
+   *
+   * Popups and a captured Ctrl+T arrive with no owner - only the input arbiter
+   * knows who clicked the link - so the hub attributes them and calls this.
+   */
+  claim(tabId: string, userId: string): Tab | undefined {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.createdBy) return tab;
+    tab.createdBy = userId;
+    setTabOwner(tabId, userId);
+    return tab;
   }
 
   /** Wire up a fresh CDP connection and rebuild tab state on top of it. */
@@ -240,8 +269,33 @@ export class TabManager extends EventEmitter {
     height?: number;
   }): Promise<Tab> {
     if (!this.cdp?.connected) throw new Error('browser_unavailable');
-    if (this.tabs.size >= config.maxTabs && !opts.reuseTabId) throw new Error('tab_limit');
+    /**
+     * Count the tabs being born, not just the ones already here.
+     *
+     * A tab only lands in `this.tabs` when Chromium attaches its session, which
+     * is several awaits away - so a burst of creates all passed this check
+     * before any of them had registered. Measured with the stress harness:
+     * twenty-four tabs open against a limit of twenty.
+     */
+    if (!opts.reuseTabId && this.tabs.size + this.pendingCreates >= config.maxTabs) throw new Error('tab_limit');
+    this.pendingCreates++;
+    try {
+      return await this.createTabInner(opts);
+    } finally {
+      this.pendingCreates--;
+    }
+  }
 
+  /** The body of createTab; the reservation above is what bounds it. */
+  private async createTabInner(opts: {
+    url?: string | null;
+    trustedUrl?: string;
+    label?: string | null;
+    createdBy: string | null;
+    reuseTabId?: string;
+    width?: number;
+    height?: number;
+  }): Promise<Tab> {
     const tabId = opts.reuseTabId ?? id('tab');
     const url = opts.trustedUrl ?? resolveTabUrl(opts.url, config.homeUrl);
     // Headless composites every page target, so tabs can share one window. A
@@ -260,7 +314,10 @@ export class TabManager extends EventEmitter {
           width: config.viewport.width,
           height: config.viewport.height,
         };
-    const creating = this.cdp
+    // The connection was checked by createTab before the reservation was taken.
+    const cdp = this.cdp;
+    if (!cdp?.connected) throw new Error('browser_unavailable');
+    const creating = cdp
       .send<{ targetId: string }>('Target.createTarget', params)
       .then(({ targetId }) => {
         this.expecting.set(targetId, {

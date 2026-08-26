@@ -24,7 +24,7 @@ import {
 import { config } from '../config.js';
 import { log } from '../log.js';
 import { id } from '../ids.js';
-import { audit, getUser, lastClosedTab, recordVisit, touchUser, userColorIndex, type UserRow } from '../db.js';
+import { audit, getUser, grantTab, lastClosedTab, recordVisit, touchUser, userColorIndex, type UserRow } from '../db.js';
 import { sessionFromRequest } from '../auth/session.js';
 import { canAdminTab, canControlTab, canViewTab, effectivePermission, roleCan } from '../auth/permissions.js';
 import { isOriginAllowed } from '../api/origin.js';
@@ -36,6 +36,8 @@ const HEARTBEAT_TIMEOUT_MS = 45_000;
 const CURSOR_FLUSH_MS = 50; // 20Hz is plenty for a cursor overlay
 const RECONNECT_GRACE_MS = 30_000;
 const IDLE_AFTER_MS = 60_000;
+/** How long a pending access request suppresses another prompt for the owner. */
+const ACCESS_REQUEST_COOLDOWN_MS = 30_000;
 
 class Connection implements FrameSink {
   readonly id = id('conn');
@@ -100,6 +102,8 @@ export class Hub {
   private cursors = new Map<string, Map<string, Cursor>>();
   /** Last URL recorded in history per tab, to avoid counting one load twice. */
   private lastRecordedUrl = new Map<string, string>();
+  /** "<tabId>:<userId>" -> when they last asked the owner for control. */
+  private accessRequests = new Map<string, number>();
   private cursorDirty = new Set<string>();
   private timers: NodeJS.Timeout[] = [];
   private shuttingDown = false;
@@ -108,7 +112,14 @@ export class Hub {
     this.rt.tabs.on('tab.created', (tab) => {
       // Explicit creates carry their requester; a popup is attributed to whoever
       // was last driving the tab that opened it.
-      const openedBy = tab.createdBy ?? (tab.openerTabId ? this.rt.input.lastActor(tab.openerTabId) : null);
+      const opener = tab.openerTabId ? this.rt.tabs.get(tab.openerTabId) : undefined;
+      // Whoever was just driving the opener, and failing that whoever owns it: a
+      // popup from your tab is yours even if you had not touched it for a while.
+      const openedBy =
+        tab.createdBy ?? (tab.openerTabId ? this.rt.input.lastActor(tab.openerTabId) : null) ?? opener?.createdBy ?? null;
+      // Attribution is also ownership: a tab a link opened belongs to the person
+      // who clicked the link, not to nobody.
+      if (openedBy && !tab.createdBy) this.rt.tabs.claim(tab.tabId, openedBy);
       this.broadcast({ type: 'tab.created', tab: this.rt.tabInfo(tab), openedBy }, (c) =>
         canViewTab(c.user, tab.tabId),
       );
@@ -118,6 +129,7 @@ export class Hub {
       void this.rt.streams.stop(tabId, 'tab closed');
       this.cursors.delete(tabId);
       this.lastRecordedUrl.delete(tabId);
+      for (const key of this.accessRequests.keys()) if (key.startsWith(`${tabId}:`)) this.accessRequests.delete(key);
       for (const c of this.connections.values()) c.subscriptions.delete(tabId);
       this.broadcast({ type: 'tab.closed', tabId });
     });
@@ -417,7 +429,17 @@ export class Hub {
       }
 
       case 'tab.close': {
-        if (!canAdminTab(conn.user, msg.tabId) && !roleCan(conn.user.role, 'tab.close')) return conn.fail('forbidden', msg.tabId);
+        /**
+         * Closing someone's tab is not a lesser act than typing in it.
+         *
+         * With ownership on, only the owner (or an admin) may close a tab -
+         * the role capability alone is not enough, or "nobody else has access"
+         * would still leave everyone able to throw the tab away.
+         */
+        const mayClose = config.tabOwnership
+          ? canAdminTab(conn.user, msg.tabId)
+          : canAdminTab(conn.user, msg.tabId) || roleCan(conn.user.role, 'tab.close');
+        if (!mayClose) return conn.fail('forbidden', msg.tabId);
         audit('tab.close', { userId: conn.userId, tabId: msg.tabId });
         void this.rt.tabs.close(msg.tabId).catch((err) => this.failAsync(conn, err, msg.type, msg.tabId));
         return;
@@ -437,7 +459,9 @@ export class Hub {
       }
 
       case 'tab.rename': {
-        if (!canControlTab(conn.user, msg.tabId)) return conn.fail('forbidden', msg.tabId);
+        // The label is part of how the owner organises their own tabs.
+        if (config.tabOwnership ? !canAdminTab(conn.user, msg.tabId) : !canControlTab(conn.user, msg.tabId))
+          return conn.fail('forbidden', msg.tabId);
         this.rt.tabs.rename(msg.tabId, msg.label);
         return;
       }
@@ -449,6 +473,61 @@ export class Hub {
         void this.rt.tabs
           .createTab({ url: closed.url, label: closed.label, createdBy: conn.userId })
           .catch((err) => this.failAsync(conn, err, msg.type));
+        return;
+      }
+
+      /**
+       * "Let me drive this tab." Delivered to the tab's owner - on whatever tab
+       * they happen to be looking at, so a request is never missed - and to
+       * admins when the owner is not connected, so it is always answerable.
+       */
+      case 'tab.access.request': {
+        if (!canViewTab(conn.user, msg.tabId)) return conn.fail('forbidden', msg.tabId);
+        if (!roleCan(conn.user.role, 'input.send')) return conn.fail('forbidden', msg.tabId);
+        const tab = this.rt.tabs.get(msg.tabId);
+        if (!tab) return conn.fail('tab_not_found', msg.tabId);
+        if (canControlTab(conn.user, msg.tabId)) return; // already has it
+        if (!tab.createdBy) return conn.fail('forbidden', msg.tabId); // nobody to ask
+
+        // One live request per person per tab: asking again inside the window is
+        // a no-op rather than another prompt in the owner's face.
+        const key = `${msg.tabId}:${conn.userId}`;
+        const previous = this.accessRequests.get(key);
+        if (previous && Date.now() - previous < ACCESS_REQUEST_COOLDOWN_MS) return;
+        this.accessRequests.set(key, Date.now());
+
+        const request: ServerMessage = {
+          type: 'tab.access.requested',
+          tabId: msg.tabId,
+          userId: conn.userId,
+          displayName: conn.user.display_name || conn.user.username,
+          at: Date.now(),
+        };
+        const owner = tab.createdBy;
+        const reached = this.broadcast(request, (c) => c.userId === owner);
+        if (reached === 0) this.broadcast(request, (c) => c.user.role === 'admin');
+        audit('tab.access.request', { userId: conn.userId, tabId: msg.tabId, detail: { owner } });
+        return;
+      }
+
+      /** The owner's answer. Granting writes a real per-tab grant. */
+      case 'tab.access.respond': {
+        if (!canAdminTab(conn.user, msg.tabId)) return conn.fail('forbidden', msg.tabId);
+        this.accessRequests.delete(`${msg.tabId}:${msg.userId}`);
+        if (msg.grant) grantTab(msg.tabId, msg.userId, 'control');
+        audit(msg.grant ? 'tab.access.granted' : 'tab.access.denied', {
+          userId: conn.userId,
+          tabId: msg.tabId,
+          detail: { to: msg.userId },
+        });
+        const byDisplayName = conn.user.display_name || conn.user.username;
+        for (const c of this.connections.values()) {
+          if (c.userId !== msg.userId) continue;
+          c.send({ type: 'tab.access.decided', tabId: msg.tabId, granted: msg.grant, byDisplayName });
+          // The permission itself, so the client stops being view-only without a
+          // reconnect or a re-subscribe.
+          c.send({ type: 'tab.permissions', tabId: msg.tabId, permission: effectivePermission(c.user, msg.tabId) });
+        }
         return;
       }
 
@@ -548,11 +627,15 @@ export class Hub {
     };
   }
 
-  broadcast(msg: ServerMessage, filter?: (c: Connection) => boolean): void {
+  /** Returns the number of connections the message actually went to. */
+  broadcast(msg: ServerMessage, filter?: (c: Connection) => boolean): number {
+    let sent = 0;
     for (const conn of this.connections.values()) {
       if (filter && !filter(conn)) continue;
       conn.send(msg);
+      sent++;
     }
+    return sent;
   }
 
   broadcastPresence(): void {
@@ -641,8 +724,18 @@ function clientIp(req: IncomingMessage): string {
 }
 
 /** Managers throw bare Error(code) strings; map them to protocol error codes. */
-function errorCode(err: unknown): ErrorCode {
+export function errorCode(err: unknown): ErrorCode {
   const m = err instanceof Error ? err.message : String(err);
   const known = ['unauthorized', 'forbidden', 'tab_not_found', 'tab_limit', 'user_limit', 'browser_unavailable', 'navigation_blocked', 'feature_disabled', 'rate_limited', 'invalid_message'] as const;
-  return (known as readonly string[]).includes(m) ? (m as ErrorCode) : 'internal';
+  if ((known as readonly string[]).includes(m)) return m as ErrorCode;
+  /**
+   * Chromium's way of saying the page is gone.
+   *
+   * Losing a race with a close is not an internal failure - it is the tab not
+   * being there any more, which is a thing the user can understand. Found by the
+   * stress harness: subscribing to a tab as it closed logged an error and told
+   * the client "something went wrong on the server".
+   */
+  if (/Session with given id not found|No target with given id|Target closed/i.test(m)) return 'tab_not_found';
+  return 'internal';
 }

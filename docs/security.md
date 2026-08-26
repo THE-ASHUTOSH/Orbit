@@ -72,7 +72,11 @@ afterwards. It is a debugging tool, not an operating mode.
   *and* deletes their sessions, so a reconnect cannot resume.
 - **WebSocket**: authenticated at upgrade from the same cookie. No token in the
   URL - URLs end up in logs and proxy history.
-- **Login throttling**: 10 attempts per IP per minute → HTTP 429.
+- **Login throttling**: 10 *failed* attempts per IP per minute → HTTP 429, for
+  correct passwords too until the window passes. Only failures count: on a LAN
+  everyone shares the router's address, so throttling successful logins would
+  have colleagues locking each other out while doing nothing extra against
+  guessing.
 
 Bootstrap: the admin account is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD`
 **only when the user table is empty**, so an env var left in a shell history
@@ -94,6 +98,22 @@ a `viewer` is capped at `view` regardless, so a mistaken grant cannot turn one
 into a controller. Verified in `permissions.test.ts` and end to end in
 `integration.test.ts` ("a viewer can watch but its input is refused
 server-side").
+
+### Tab ownership (`TAB_OWNERSHIP`, on by default)
+
+A tab belongs to whoever opened it - the `+` button, or the click that opened the
+popup, attributed by the input arbiter. The owner gets `admin` on that tab, so
+they can hand control out; everyone else gets `view` until an explicit grant says
+otherwise, and that includes closing and renaming it.
+
+Requests for control are just messages: the asker sends `tab.access.request`, the
+server delivers it to the owner's connections (or to admins when the owner is not
+connected, so a request is always answerable), and only a tab admin's
+`tab.access.respond` writes the grant. A pending request is suppressed for 30s so
+nobody can spam the owner's screen. Both the request and the decision are audited.
+
+Role admins keep `admin` on every tab: somebody has to be able to close a tab
+whose owner has gone home.
 
 ## Input validation
 

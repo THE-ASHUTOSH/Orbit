@@ -178,6 +178,25 @@ export const FileChooserRespondMessage = z.object({
   files: z.array(z.string().max(255)).max(10),
 });
 
+/**
+ * Ask the tab's owner for control of it.
+ *
+ * A tab belongs to whoever opened it; everyone else watches until the owner says
+ * otherwise, which is what these two messages negotiate.
+ */
+export const TabAccessRequestMessage = z.object({
+  type: z.literal('tab.access.request'),
+  tabId: TabId,
+});
+
+export const TabAccessRespondMessage = z.object({
+  type: z.literal('tab.access.respond'),
+  tabId: TabId,
+  /** Who asked. */
+  userId: UserId,
+  grant: z.boolean(),
+});
+
 /** Reopen the most recently closed tab, like Ctrl+Shift+T. */
 export const TabReopenMessage = z.object({ type: z.literal('tab.reopen') });
 
@@ -213,6 +232,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   TabResizeMessage,
   TabZoomMessage,
   TabReopenMessage,
+  TabAccessRequestMessage,
+  TabAccessRespondMessage,
   ContextProbeMessage,
   ClipboardWriteMessage,
   FileChooserRespondMessage,
@@ -243,6 +264,13 @@ export interface TabInfo {
   /** Content magnification; the viewport is base size divided by this. */
   zoom: number;
   createdAt: number;
+  /**
+   * Whoever opened the tab - by pressing +, or by clicking the link that opened
+   * it. Null for tabs nobody claimed (the browser's own first tab, or a tab
+   * restored from before this user existed). The owner controls it; everyone else
+   * watches unless granted otherwise.
+   */
+  ownerId: string | null;
   /** Users currently subscribed to this tab. */
   viewers: string[];
 }
@@ -303,6 +331,10 @@ export type ServerMessage =
   | { type: 'stream.stopped'; tabId: string; reason: string }
   | { type: 'input.ack'; eventId: string; tabId: string; serverReceiveTime: number; dispatchedAt: number; queueDepth: number }
   | { type: 'clipboard.data'; tabId: string; text: string }
+  /** Someone is asking the owner of this tab for control of it. */
+  | { type: 'tab.access.requested'; tabId: string; userId: string; displayName: string; at: number }
+  /** The owner answered a request this client made. */
+  | { type: 'tab.access.decided'; tabId: string; granted: boolean; byDisplayName: string }
   | {
       type: 'context.info';
       tabId: string;

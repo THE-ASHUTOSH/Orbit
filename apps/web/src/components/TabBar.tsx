@@ -18,6 +18,9 @@ export function TabBar({ tabs, activeTabId, users, canCreate, onSelect, onClose,
       {tabs.map((tab) => {
         const active = tab.tabId === activeTabId;
         const viewers = users.filter((u) => tab.viewers.includes(u.userId));
+        // Whose tab this is, on hover: the toolbar says it too, but only once you
+        // are already on the tab.
+        const owner = users.find((u) => u.userId === tab.ownerId);
         return (
           <div
             key={tab.tabId}
@@ -31,7 +34,7 @@ export function TabBar({ tabs, activeTabId, users, canCreate, onSelect, onClose,
                 ? 'border-line-2 bg-surface text-ink'
                 : 'border-transparent bg-elev/60 text-ink-2 hover:bg-elev'
             }`}
-            title={`${tab.title || tab.url}\n${tab.url}\n${tab.tabId}`}
+            title={`${tab.title || tab.url}\n${tab.url}\n${owner ? `opened by ${owner.displayName}\n` : ''}${tab.tabId}`}
           >
             {tab.loading ? (
               <span className="size-2 shrink-0 animate-pulse rounded-full bg-sky-400" />

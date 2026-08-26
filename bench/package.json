@@ -4,8 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "bench": "node --experimental-strip-types --disable-warning=ExperimentalWarning benchmark.ts"
+    "bench": "node --experimental-strip-types --disable-warning=ExperimentalWarning benchmark.ts",
+    "stress": "node --experimental-strip-types --disable-warning=ExperimentalWarning stress.ts"
   },
-  "dependencies": { "@orbit/protocol": "*", "ws": "^8.18.0" },
-  "devDependencies": { "@types/ws": "^8.5.13" }
+  "dependencies": {
+    "@orbit/protocol": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
 }

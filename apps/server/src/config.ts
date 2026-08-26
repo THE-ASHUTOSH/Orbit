@@ -104,6 +104,16 @@ export const config = {
    * deployment where an admin must hand out control per tab.
    */
   defaultTabPermission: (process.env.DEFAULT_TAB_PERMISSION === 'view' ? 'view' : 'control') as 'view' | 'control',
+  /**
+   * A tab belongs to whoever opened it: they control it, everyone else watches
+   * until granted otherwise (and can ask for it in the UI).
+   *
+   * Off restores the older behaviour, where any tab is everybody's to drive -
+   * which is the right default for a small trusted group sharing one screen, and
+   * the wrong one the moment somebody is doing something they would rather not
+   * have typed into.
+   */
+  tabOwnership: process.env.TAB_OWNERSHIP !== 'false' && process.env.TAB_OWNERSHIP !== '0',
 
   clipboardEnabled: bool(process.env.CLIPBOARD_ENABLED, true),
   downloadsEnabled: bool(process.env.DOWNLOADS_ENABLED, true),

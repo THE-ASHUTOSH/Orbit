@@ -32,14 +32,16 @@ time. Text frames carry JSON control messages; binary frames carry video.
 | `tab.subscribe` | start receiving frames for a tab | view |
 | `tab.unsubscribe` | stop receiving frames | - |
 | `tab.create` | new tab, optional `url` and `label` | role `tab.create` |
-| `tab.close` | close a tab | tab admin or role `tab.close` |
+| `tab.close` | close a tab | the owner or an admin (role `tab.close` alone when `TAB_OWNERSHIP=false`) |
 | `tab.navigate` | navigate a tab | control |
 | `tab.action` | `reload` / `back` / `forward` / `stop` / `duplicate` | control |
-| `tab.rename` | set the tab label | control |
+| `tab.rename` | set the tab label | the owner or an admin (control when `TAB_OWNERSHIP=false`) |
 | `tab.resize` | change the streamed viewport | control |
 | `tab.zoom` | zoom 0.25-4, applied by resizing the remote viewport | control |
 | `tab.reopen` | reopen the most recently closed tab | role `tab.create` |
 | `context.probe` | ask what is under a page coordinate, for the right-click menu | view |
+| `tab.access.request` | ask the tab's owner for control of it | view |
+| `tab.access.respond` | the owner's answer: grant or refuse | tab admin (i.e. the owner) |
 | `clipboard.write` | insert text into the page | control + `CLIPBOARD_ENABLED` |
 | `file.chooser.respond` | answer a page's file dialog with uploaded names | control + `UPLOADS_ENABLED` |
 | `ping` | round-trip measurement | - |
@@ -99,6 +101,8 @@ Example:
 | `input.ack` | per-event timings: `serverReceiveTime`, `dispatchedAt`, `queueDepth` |
 | `clipboard.data` | text copied inside the page |
 | `context.info` | answer to `context.probe`: `link`, `image`, `selection` |
+| `tab.access.requested` | someone is asking the owner for control (sent to the owner; to admins if the owner is offline) |
+| `tab.access.decided` | the owner answered a request this client made |
 | `file.chooser` | the page opened a file dialog |
 | `download` | download started / progress / completed / canceled |
 | `metrics` | server metrics, admins only, every 2s |
@@ -107,7 +111,8 @@ Example:
 | `error` | `{ code, message, tabId? }` |
 
 `BrowserState` is the whole authoritative picture - `browserId`, `status`,
-`tabs[]` (each with url, title, loading, canGoBack/Forward, size, viewers),
+`tabs[]` (each with url, title, loading, canGoBack/Forward, size, `ownerId`,
+viewers),
 `users[]`, `limits`, `features`.
 
 ## Binary frames

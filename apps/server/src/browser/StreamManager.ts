@@ -212,10 +212,28 @@ export class StreamManager {
   async restart(tabId: string): Promise<void> {
     const state = this.streams.get(tabId);
     if (!state?.sinks.size) return;
-    const sinks = new Map(state.sinks);
-    await this.stop(tabId, 'resize');
-    const fresh: StreamState = { tabId, sinks, seq: state.seq, lastFrameAt: 0, pendingAck: null, active: false };
-    this.streams.set(tabId, fresh);
+
+    /**
+     * The same state object throughout - deliberately.
+     *
+     * This used to snapshot the sinks, await stop() (which deletes the entry),
+     * and then put a fresh state back. Anyone who subscribed during that await
+     * created their own entry, which the snapshot then overwrote: their sink was
+     * silently gone, so they got their keyframe and never another frame.
+     *
+     * That is a real symptom, not a theoretical one - it is what made a second
+     * viewer joining a tab mid-resize sit there with a frozen picture.
+     */
+    if (state.pendingAck) clearTimeout(state.pendingAck);
+    state.pendingAck = null;
+    state.active = false;
+    const tab = this.tabs.get(tabId);
+    if (tab?.sessionId && this.cdp?.connected)
+      await this.cdp.send('Page.stopScreencast', {}, tab.sessionId).catch(() => {});
+    log.info('stream stopped', { tabId, reason: 'resize' });
+
+    // The last viewer may have left while that was in flight.
+    if (this.streams.get(tabId) !== state || state.sinks.size === 0) return;
     await this.ensureStarted(tabId);
   }
 

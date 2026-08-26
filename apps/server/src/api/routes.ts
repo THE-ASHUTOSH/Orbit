@@ -69,20 +69,29 @@ declare global {
   }
 }
 
-/** Login attempts per IP: slow down credential stuffing on an exposed port. */
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+/**
+ * FAILED login attempts per IP: slow down credential stuffing on an exposed port.
+ *
+ * Failures only, deliberately. Counting successes throttles the normal case -
+ * everyone in one room shares the router's address, so a handful of people
+ * signing in on their phones would lock each other out - while doing nothing
+ * extra against guessing, which is all failures anyway.
+ */
+const failedLogins = new Map<string, { count: number; resetAt: number }>();
 const LOGIN_WINDOW_MS = 60_000;
 const LOGIN_MAX = 10;
 
 function loginRateLimited(ip: string): boolean {
+  const entry = failedLogins.get(ip);
+  if (!entry || entry.resetAt < Date.now()) return false;
+  return entry.count >= LOGIN_MAX;
+}
+
+function recordFailedLogin(ip: string): void {
   const now = Date.now();
-  const entry = loginAttempts.get(ip);
-  if (!entry || entry.resetAt < now) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
-    return false;
-  }
-  entry.count++;
-  return entry.count > LOGIN_MAX;
+  const entry = failedLogins.get(ip);
+  if (!entry || entry.resetAt < now) failedLogins.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+  else entry.count++;
 }
 
 export function buildApp(rt: Runtime, hub: () => Hub): Express {
@@ -144,9 +153,13 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
       return res.status(429).json({ error: 'too_many_attempts' });
     }
     const parsed = Credentials.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+    if (!parsed.success) {
+      recordFailedLogin(ip);
+      return res.status(400).json({ error: 'invalid_request' });
+    }
     const user = authenticate(parsed.data.username, parsed.data.password);
     if (!user) {
+      recordFailedLogin(ip);
       log.warn('failed login', { username: parsed.data.username.slice(0, 40), ip });
       audit('auth.login.failed', { detail: { username: parsed.data.username.slice(0, 40) } });
       // Same message for unknown user and wrong password.

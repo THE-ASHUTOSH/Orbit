@@ -21,7 +21,8 @@
     "test": "npm run test --workspace @orbit/server",
     "test:e2e": "playwright test || (echo \"\\n  e2e needs Playwright:  npm i -D @playwright/test && npx playwright install chromium\\n\" && exit 1)",
     "lint": "npm run typecheck",
-    "benchmark": "npm run bench --workspace @orbit/bench"
+    "benchmark": "npm run bench --workspace @orbit/bench",
+    "stress": "npm run stress --workspace @orbit/bench"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

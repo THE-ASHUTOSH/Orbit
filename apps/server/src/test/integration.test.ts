@@ -307,13 +307,15 @@ test('orbit: end to end', async (t) => {
   await t.test('Test 4: two tabs are created with distinct stable ids', async () => {
     alice.send({ type: 'tab.create', url: pageUrl('one'), label: 'tab-one' });
     const created1 = await alice.waitForMessage('tab.created', (m) => m.tab.label === 'tab-one');
-    alice.send({ type: 'tab.create', url: pageUrl('two'), label: 'tab-two' });
+    // Opened by bob, so the suite has a tab owned by someone who is not an admin.
+    bob.send({ type: 'tab.create', url: pageUrl('two'), label: 'tab-two' });
     const created2 = await alice.waitForMessage('tab.created', (m) => m.tab.label === 'tab-two');
 
     tab1 = created1.tab;
     tab2 = created2.tab;
     assert.notEqual(tab1.tabId, tab2.tabId);
     assert.match(tab1.tabId, /^tab_[0-9A-Z]{22}$/, 'ids are prefixed ULIDs, not indexes');
+    assert.equal(tab2.ownerId, await bobUserId(base, adminCookie), 'a tab belongs to whoever opened it');
     // Both clients learn about both tabs.
     await bob.waitForMessage('tab.created', (m) => m.tab.tabId === tab2.tabId);
   });
@@ -372,9 +374,75 @@ test('orbit: end to end', async (t) => {
 
   const carol = new TestClient('carol', base, carolCookie);
 
-  await t.test('Test 8: two users control the same tab, server orders their input', async () => {
+  await t.test('a tab belongs to whoever opened it; anyone else has to ask', async () => {
     await carol.connect();
     await carol.ready();
+    carol.send({ type: 'tab.subscribe', tabId: tab2.tabId, width: 900, height: 600 });
+    await carol.waitForMessage('stream.started', (m) => m.tabId === tab2.tabId);
+
+    // tab2 is bob's. Carol can watch it...
+    const asView = await carol.waitForMessage('tab.permissions', (m) => m.tabId === tab2.tabId);
+    assert.equal(asView.permission, 'view', "someone else's tab is view-only");
+
+    // ...but not type in it.
+    typed.clear();
+    await carol.type(tab2.tabId, 'nope');
+    await carol.waitForMessage('error', (m) => m.code === 'forbidden');
+    await sleep(300);
+    assert.equal(typed.get('two-b'), undefined, 'view-only means view-only');
+
+    // So she asks, and the owner - a plain user, not an admin - is the one asked.
+    carol.send({ type: 'tab.access.request', tabId: tab2.tabId });
+    const asked = await bob.waitForMessage('tab.access.requested', (m) => m.tabId === tab2.tabId);
+    assert.equal(asked.userId, await carolUserId(base, adminCookie));
+    assert.ok(asked.displayName.length > 0, 'the owner is told who is asking');
+
+    // Refusing leaves things exactly as they were.
+    bob.send({ type: 'tab.access.respond', tabId: tab2.tabId, userId: asked.userId, grant: false });
+    const refused = await carol.waitForMessage('tab.access.decided', (m) => m.tabId === tab2.tabId);
+    assert.equal(refused.granted, false);
+    typed.clear();
+    await carol.type(tab2.tabId, 'still-nope');
+    await carol.waitForMessage('error', (m) => m.code === 'forbidden');
+    assert.equal(typed.get('two-b'), undefined);
+
+    // Granting takes effect immediately - no reconnect, no re-subscribe.
+    carol.send({ type: 'tab.access.request', tabId: tab2.tabId });
+    const again = await bob.waitForMessage('tab.access.requested', (m) => m.tabId === tab2.tabId && m.at > asked.at);
+    bob.send({ type: 'tab.access.respond', tabId: tab2.tabId, userId: again.userId, grant: true });
+    const granted = await carol.waitForMessage('tab.access.decided', (m) => m.tabId === tab2.tabId && m.granted);
+    assert.ok(granted.granted);
+    const nowControl = await carol.waitForMessage(
+      'tab.permissions',
+      (m) => m.tabId === tab2.tabId && m.permission === 'control',
+    );
+    assert.equal(nowControl.permission, 'control');
+
+    typed.clear();
+    await carol.click(tab2.tabId, 120, 60); // focus the field first, as a person would
+    await carol.type(tab2.tabId, 'hello');
+    const text = await waitFor('carol can type once granted', () => typed.get('two-b'));
+    assert.match(text, /hello$/, `granted control really reaches the page: ${text}`);
+
+    // Control is not ownership: she can drive the tab, not dispose of it.
+    carol.send({ type: 'tab.close', tabId: tab2.tabId });
+    await carol.waitForMessage('error', (m) => m.code === 'forbidden');
+    assert.ok(
+      (await stateOf(base, adminCookie)).tabs.some((t) => t.tabId === tab2.tabId),
+      "someone else's tab cannot be closed out from under them",
+    );
+
+    carol.send({ type: 'tab.unsubscribe', tabId: tab2.tabId });
+  });
+
+  await t.test('Test 8: two users control the same tab, server orders their input', async () => {
+    // tab1 is alice's, so carol asks for it the same way - this time the owner
+    // happens to be an admin.
+    carol.send({ type: 'tab.access.request', tabId: tab1.tabId });
+    const req = await alice.waitForMessage('tab.access.requested', (m) => m.tabId === tab1.tabId);
+    alice.send({ type: 'tab.access.respond', tabId: tab1.tabId, userId: req.userId, grant: true });
+    await carol.waitForMessage('tab.permissions', (m) => m.tabId === tab1.tabId && m.permission === 'control');
+
     carol.send({ type: 'tab.subscribe', tabId: tab1.tabId, width: 900, height: 600 });
     await carol.waitForMessage('stream.started', (m) => m.tabId === tab1.tabId);
     // Carol is the second subscriber to an already-running stream: she must get
@@ -522,6 +590,9 @@ test('orbit: end to end', async (t) => {
       20_000,
     );
     assert.match(created.tab.tabId, /^tab_/);
+    // A popup belongs to whoever clicked the link that opened it.
+    assert.equal(created.openedBy, await userIdOf(base, adminCookie, 'admin'));
+    assert.equal(created.tab.ownerId, created.openedBy, 'attribution and ownership are the same thing');
     // Everyone sees it, not just the user who clicked.
     await bob.waitForMessage('tab.created', (m) => m.tab.tabId === created.tab.tabId);
   });
@@ -666,6 +737,41 @@ test('orbit: end to end', async (t) => {
     assert.ok(existsSync(path.join(dataDir, 'app.db')));
   });
 
+  await t.test('login throttling counts failures, not the people signing in', async () => {
+    /**
+     * Everyone in one room shares the router's address, so throttling successful
+     * logins would have them locking each other out. Guessing is throttled;
+     * signing in is not.
+     *
+     * Last of the tests that log in, on purpose: it deliberately trips the
+     * limiter, and the window is a minute long.
+     */
+    const login = (username: string, password: string) =>
+      fetch(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+    // Well past the limit, all of them correct.
+    for (let i = 0; i < 14; i++) {
+      const res = await login('admin', ADMIN_PASSWORD);
+      assert.equal(res.status, 200, `successful login ${i + 1} must not be throttled`);
+    }
+
+    // Wrong ones still add up, and then the door closes - even for a good
+    // password. Counted with a loop rather than an exact number: earlier tests
+    // in this suite have already got some passwords wrong.
+    let throttled = false;
+    for (let i = 0; i < 15 && !throttled; i++) {
+      const res = await login('admin', 'not-the-password');
+      if (res.status === 429) throttled = true;
+      else assert.equal(res.status, 401, 'a wrong password is 401 until the limit');
+    }
+    assert.ok(throttled, 'guessing is throttled');
+    assert.equal((await login('admin', ADMIN_PASSWORD)).status, 429, 'and the window applies to the whole IP');
+  });
+
   await t.test('graceful shutdown notifies clients and closes the browser', async () => {
     const watcher = new TestClient('watcher', base, adminCookie);
     await watcher.connect();
@@ -679,9 +785,17 @@ test('orbit: end to end', async (t) => {
   });
 });
 
+async function stateOf(base: string, cookie: string): Promise<{ tabs: TabInfo[] }> {
+  const res = await fetch(`${base}/api/state`, { headers: { Cookie: cookie } });
+  return ((await res.json()) as { state: { tabs: TabInfo[] } }).state;
+}
+
 /** The admin API is the only place that maps usernames to ids. */
-async function bobUserId(base: string, cookie: string): Promise<string> {
+async function userIdOf(base: string, cookie: string, username: string): Promise<string> {
   const res = await fetch(`${base}/api/admin/users`, { headers: { Cookie: cookie } });
   const body = (await res.json()) as { users: { userId: string; username: string }[] };
-  return body.users.find((u) => u.username === 'bob')!.userId;
+  return body.users.find((u) => u.username === username)!.userId;
 }
+
+const bobUserId = (base: string, cookie: string) => userIdOf(base, cookie, 'bob');
+const carolUserId = (base: string, cookie: string) => userIdOf(base, cookie, 'carol');

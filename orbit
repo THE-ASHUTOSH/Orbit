@@ -135,6 +135,7 @@ node --watch --enable-source-maps dist/index.js
 concurrently -k -n tsc,node
 node --test.*dist/test
 bench/benchmark.ts
+bench/stress.ts
 PATTERNS
 }
 
@@ -312,6 +313,14 @@ cmd_restart() {
   info "browser restarting - clients reattach on their own"
 }
 
+cmd_stress() {
+  load_env
+  local base="${BASE_URL:-$LOCAL}"
+  info "stress testing ${base} - this is meant to hurt: heavy load, races, abuse, a killed browser"
+  BASE_URL="$base" BENCH_USER="$ADMIN_USERNAME" BENCH_PASSWORD="$ADMIN_PASSWORD" \
+    USERS="${1:-12}" TABS="${2:-6}" npm run stress
+}
+
 cmd_bench() {
   load_env
   local users="${1:-10}" tabs="${2:-5}" secs="${3:-30}" base="${BASE_URL:-$LOCAL}"
@@ -398,6 +407,7 @@ case "${1:-help}" in
   ext)      shift; cmd_ext "$@" ;;
   test)     shift; npm test ;;
   bench)    shift; cmd_bench "$@" ;;
+  stress)   shift; cmd_stress "$@" ;;
   dev)      shift; npm run dev ;;
   backup)   shift; cmd_backup "$@" ;;
   restore)  shift; cmd_restore "$@" ;;

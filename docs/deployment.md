@@ -108,6 +108,7 @@ that matter most:
 | `STREAM_QUALITY` | 70 | JPEG quality 1-100 |
 | `MAX_TABS` / `MAX_USERS` | 20 / 50 | resource ceilings |
 | `DEFAULT_TAB_PERMISSION` | `control` | `view` makes control opt-in per tab |
+| `TAB_OWNERSHIP` | `true` | a tab belongs to whoever opened it; others watch until granted control. `false` restores the shared free-for-all |
 | `CHROMIUM_HEADLESS` | `false` | headed (normal browser) vs cheaper headless |
 | `MDNS_ENABLED` | `true` (env) / `false` (compose) | `.local` name; needs host networking |
 | `SECURE_COOKIES` / `TRUST_PROXY` | `false` | set both behind an HTTPS proxy |

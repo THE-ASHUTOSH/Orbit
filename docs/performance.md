@@ -159,6 +159,73 @@ At p50 ≈ 26ms on the reference machine, roughly:
 The pacing term is why p95 sits well above p50: an input landing just after a
 capture waits for the next one. Raising `MAX_FPS` shrinks it at a linear CPU cost.
 
+## Stress and abuse
+
+`./orbit stress` pushes rather than measures: nine scenarios, each reporting
+numbers **and** invariants. Everything below is from one run on a 6-core / 6 GB
+container, with every tab on the self-test page - which repaints continuously and
+is therefore the most expensive page there is. Real browsing, where pages sit
+still most of the time, is far cheaper.
+
+### The load ladder
+
+Users and tabs raised together, 20s per rung, every tab animating:
+
+| Users x tabs | fps per client | worst client | input p95 | CPU mean/max | memory |
+|---|---|---|---|---|---|
+| 8 x 4 | 27.1 | 17.6 | 3 ms | 39% / 62% | 2.3 GB |
+| 20 x 10 | 12.6 | 6.3 | 16 ms | 59% / 74% | 2.5 GB |
+| 40 x 20 | 6.8 | 4.3 | 11 ms | 69% / 100% | 4.2 GB |
+| 50 x 20 | 0.3 | 0.3 | 106 ms | 88% / 99% | 3.5 GB |
+
+Read the shape, not the peak. **Interaction stays responsive far past the point
+where the picture does**: at 40 users on 20 animating tabs input still acks in
+11 ms p95, while the frame rate has fallen to ~7 fps per client because six cores
+cannot composite and JPEG-encode twenty continuously-repainting pages. Nobody
+ever went silent, no errors were returned, memory peaked at 4.2 GB of 6 GB, and
+the input queue never grew past zero.
+
+The practical ceiling on this box is therefore **CPU on frame production**, and
+it is reached by tab count far sooner than by user count: 20 idle tabs cost
+almost nothing, 20 animating ones cost everything. `MAX_FPS` and `STREAM_QUALITY`
+are the two dials that buy it back.
+
+### Steady state
+
+| Scenario | Result |
+|---|---|
+| 1 user, 1 tab, 15s | 30.3 fps, 10.1 Mbps, input p50 1 ms / p95 2 ms, CPU 10% |
+| 16 users, 10 tabs, 30s | 14.1 fps/client (worst 13.8), 69 Mbps total, input p50 2 / p95 6 / p99 24 ms, CPU 55%, 2.7 GB |
+| 16 tabs, 8 watchers, 120s soak | every watcher streamed throughout, memory 3.04 -> 3.55 GB, no page crashed |
+
+### Correctness under pressure
+
+| What was done | What held |
+|---|---|
+| 6 people typing into one tab at once | all 72 keystrokes reached the page, 12 of each letter - none lost, none duplicated (read back from the page itself) |
+| 3 people asking one owner for control simultaneously | every request delivered, repeats inside the window suppressed, exactly one granted, the other two still refused and nothing they typed reached the page |
+| A viewer subscribing while the viewport resizes, x8 | 0 starved (this is the race that used to freeze the second viewer) |
+| Closing 4 tabs while 4 clients subscribe to them | all closed cleanly, no socket dropped, and the loser of the race now gets `tab_not_found` instead of `internal` |
+| 20 zoom/resize messages from two clients at once | both kept streaming, viewport ended sane (1706x880) |
+| 25 subscribe/unsubscribe flaps | stream working at the end |
+| 24 tab creates against a limit of 20 | exactly 20 open, 4 refused with `tab_limit` |
+| 2000 input messages in a burst | rate-limited, then the connection closed 1008 |
+| Garbage JSON, unknown types, bad tab ids, `file://` navigation | refused by code (`invalid_message`, `navigation_blocked`), server healthy |
+| A 2 MB message | that one socket closed 1009, nothing else affected |
+| `SIGKILL` on Chromium mid-stream | clients told, browser back in **1.6 s**, tab ids preserved, frames resumed |
+
+### What this run does not cover
+
+- **`MAX_USERS`** (50 *distinct* people) - the harness drives many sockets from
+  one account, which is deliberately not the same gate.
+- **A slow client**, i.e. the frame-dropping backpressure path: hard to simulate
+  honestly from Node, which drains sockets as fast as it can.
+- **Heavy real pages** (image galleries, video) - the self-test page is a
+  worst-case *repainter* but a trivial *renderer*.
+- **A hostile LAN**: everything here runs over loopback, so the numbers exclude
+  real network transit. Point `BASE_URL` at the LAN address from another machine
+  to include it.
+
 ## Honest limitations
 
 - Measured on loopback; LAN transit is additive and not included.

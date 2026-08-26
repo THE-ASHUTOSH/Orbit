@@ -389,6 +389,83 @@ test.describe('orbit UI', () => {
     await last.getByRole('button', { name: 'Close tab' }).click();
   });
 
+  test('a tab belongs to whoever opened it, and control can be asked for', async ({ browser }) => {
+    /**
+     * Two ordinary users, because the admin account can always control every tab
+     * and would prove nothing here. They are created for this test and removed
+     * at the end.
+     */
+    const PW = 'ownership-test-pw';
+    const owner = { user: `owner-${Date.now()}`, ctx: await browser.newContext() };
+    const asker = { user: `asker-${Date.now()}`, ctx: await browser.newContext() };
+    const adminCtx = await browser.newContext();
+    const adminPage = await adminCtx.newPage();
+
+    const makeUser = (username: string) =>
+      adminPage.evaluate(
+        async ([u, p]) =>
+          (
+            await fetch('/api/admin/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: u, password: p, role: 'user' }),
+            })
+          ).status,
+        [username, PW],
+      );
+
+    try {
+      await signIn(adminPage);
+      expect(await makeUser(owner.user)).toBeLessThan(300);
+      expect(await makeUser(asker.user)).toBeLessThan(300);
+
+      const ownerPage = await owner.ctx.newPage();
+      const askerPage = await asker.ctx.newPage();
+      await signIn(ownerPage, owner.user, PW);
+      await signIn(askerPage, asker.user, PW);
+
+      // The owner opens a tab. It is theirs.
+      const ownerTabs = ownerPage.locator('div[title*="tab_"]');
+      const beforeCount = await ownerTabs.count();
+      await ownerPage.getByRole('button', { name: 'New tab' }).click();
+      await expect(ownerTabs).toHaveCount(beforeCount + 1);
+      const tabId = (await ownerTabs.last().getAttribute('title'))!.match(/tab_[0-9A-Z]+/)![0];
+
+      // The other user can watch it, and is told whose it is.
+      const askerTab = askerPage.locator(`div[title*="${tabId}"]`);
+      await expect(askerTab).toBeVisible();
+      await askerTab.click();
+      const ask = askerPage.getByRole('button', { name: new RegExp(`Ask .*${owner.user}.* for control`) });
+      await expect(ask).toBeVisible();
+      // View-only: the address bar says so rather than pretending to work.
+      await expect(askerPage.getByPlaceholder('View only')).toBeVisible();
+
+      // Asking reaches the owner, wherever they are looking.
+      await ask.click();
+      const prompt = ownerPage.getByRole('alertdialog', { name: new RegExp(`${asker.user}.*asking for control`) });
+      await expect(prompt).toBeVisible();
+      await expect(ask).toContainText('Asked');
+
+      // Granting takes effect without a reload.
+      await prompt.getByRole('button', { name: 'Give control' }).click();
+      await expect(askerPage.getByPlaceholder('Search or enter address')).toBeVisible();
+      await expect(ask).toHaveCount(0);
+      await expect(prompt).toHaveCount(0);
+
+      // Tidy up: the tab, then the two accounts.
+      await ownerTabs.last().hover();
+      await ownerTabs.last().getByRole('button', { name: 'Close tab' }).click();
+      await expect(ownerTabs).toHaveCount(beforeCount);
+    } finally {
+      await adminPage.evaluate(async (names) => {
+        const { users } = await (await fetch('/api/admin/users')).json();
+        for (const u of users as { userId: string; username: string }[])
+          if (names.includes(u.username)) await fetch(`/api/admin/users/${u.userId}`, { method: 'DELETE' });
+      }, [owner.user, asker.user]);
+      await Promise.all([owner.ctx.close(), asker.ctx.close(), adminCtx.close()]);
+    }
+  });
+
   test('rejects a bad password without revealing whether the user exists', async ({ page }) => {
     await page.goto('/');
     await page.getByLabel('Username').fill('definitely-not-a-user');

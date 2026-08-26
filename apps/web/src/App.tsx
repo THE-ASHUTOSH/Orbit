@@ -27,6 +27,7 @@ import { Menu } from './components/Menu';
 import { BookmarksPanel, HistoryPanel } from './components/BookmarksPanel';
 import { ContextMenu, type ContextTarget } from './components/ContextMenu';
 import { ExtensionsPanel } from './components/ExtensionsPanel';
+import { AccessRequests, type AccessRequest } from './components/AccessRequests';
 import { useTheme } from './lib/theme';
 import { captureKeyboard, releaseKeyboard, fullCaptureAvailable, type CaptureMode } from './lib/keyboard';
 
@@ -76,6 +77,10 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
    * tab at a time, because fullscreen is a property of the document.
    */
   const [capture, setCapture] = useState<{ tabId: string; mode: CaptureMode } | null>(null);
+  /** Requests from other people for tabs this user owns. */
+  const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
+  /** Tabs where this user has already asked the owner, so we stop asking. */
+  const [asked, setAsked] = useState<Set<string>>(new Set());
   /** Set when the server answers a right-click probe. */
   const [context, setContext] = useState<ContextTarget | null>(null);
   /** Where the pending right-click happened on screen, for menu placement. */
@@ -202,6 +207,25 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
             void api.downloads().then((r) => setDownloads(r.files)).catch(() => {});
           }
           break;
+        case 'tab.access.requested':
+          setAccessRequests((rs) =>
+            rs.some((r) => r.tabId === msg.tabId && r.userId === msg.userId)
+              ? rs
+              : [...rs, { tabId: msg.tabId, userId: msg.userId, displayName: msg.displayName, at: msg.at }],
+          );
+          break;
+        case 'tab.access.decided':
+          setAsked((a) => {
+            const next = new Set(a);
+            next.delete(msg.tabId);
+            return next;
+          });
+          setToast(
+            msg.granted
+              ? `${msg.byDisplayName} gave you control of that tab.`
+              : `${msg.byDisplayName} kept control of that tab.`,
+          );
+          break;
         case 'context.info':
           setContext({
             x: contextAt.current.x,
@@ -324,6 +348,22 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
     const existing = bookmarks.find((b) => b.url === activeTab.url);
     const done = existing ? api.removeBookmark(existing.id) : api.addBookmark(activeTab.url, activeTab.title);
     void done.then(refreshBookmarks).catch(() => setToast('Could not save the bookmark.'));
+  };
+
+  const ownerOf = (tab: typeof activeTab) => (tab?.ownerId && tab.ownerId !== self.userId ? tab.ownerId : null);
+  const nameOfUser = (userId: string) =>
+    state?.users.find((u) => u.userId === userId)?.displayName ?? 'the owner';
+
+  /** Ask the owner of the current tab for control of it. */
+  const requestControl = () => {
+    if (!activeTabId) return;
+    socket.send({ type: 'tab.access.request', tabId: activeTabId });
+    setAsked((a) => new Set(a).add(activeTabId));
+  };
+
+  const respondToRequest = (request: AccessRequest, grant: boolean) => {
+    socket.send({ type: 'tab.access.respond', tabId: request.tabId, userId: request.userId, grant });
+    setAccessRequests((rs) => rs.filter((r) => !(r.tabId === request.tabId && r.userId === request.userId)));
   };
 
   /**
@@ -463,6 +503,12 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
         canControl={canControl}
         bookmarked={bookmarked}
         onToggleBookmark={toggleBookmark}
+        ownerName={
+          // Only worth offering when asking could actually change something.
+          !canControl && ownerOf(activeTab) && self.role !== 'viewer' ? nameOfUser(activeTab!.ownerId!) : null
+        }
+        requestPending={!!activeTabId && asked.has(activeTabId)}
+        onRequestControl={requestControl}
         onNavigate={navigate}
         onAction={(action) => activeTabId && socket.send({ type: 'tab.action', tabId: activeTabId, action })}
         onResetZoom={() => activeTabId && socket.send({ type: 'tab.zoom', tabId: activeTabId, zoom: 1 })}
@@ -588,6 +634,13 @@ function Workspace({ self, onSignedOut }: { self: SelfUser; onSignedOut: () => v
             onClear={() => void api.clearHistory().then(() => setHistory([])).catch(() => setToast('Only an admin can clear history.'))}
           />
         )}
+
+        <AccessRequests
+          requests={accessRequests}
+          tabs={state?.tabs ?? []}
+          onRespond={respondToRequest}
+          onSelectTab={selectTab}
+        />
 
         {showExtensions && (
           <ExtensionsPanel
