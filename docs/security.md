@@ -112,6 +112,14 @@ connected, so a request is always answerable), and only a tab admin's
 `tab.access.respond` writes the grant. A pending request is suppressed for 30s so
 nobody can spam the owner's screen. Both the request and the decision are audited.
 
+Ownership restricts a tab that *has* an owner. A tab nobody claimed - one an
+extension opened for itself, or a redirect that arrived with no attribution -
+stays everybody's, so the person looking at it can close and rename it. The
+attribution chain tries the requester, then whoever was last driving the tab that
+opened it, then that tab's owner, and finally the only person who has been active
+at all - that last step is skipped when two people have been, so it never guesses
+between them.
+
 Role admins keep `admin` on every tab: somebody has to be able to close a tab
 whose owner has gone home.
 

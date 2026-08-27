@@ -1,7 +1,15 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { openInMemoryForTests, createUser, grantTab, revokeTab, authenticate, insertTab } from '../db.js';
-import { canAdminTab, canControlTab, canViewTab, effectivePermission, roleCan } from '../auth/permissions.js';
+import {
+  canAdminTab,
+  canCloseTab,
+  canControlTab,
+  canRenameTab,
+  canViewTab,
+  effectivePermission,
+  roleCan,
+} from '../auth/permissions.js';
 
 let admin: { id: string; role: 'admin' };
 let user: { id: string; role: 'user' };
@@ -114,4 +122,24 @@ test('authz: an unowned tab is still shared, so nothing changes for existing tab
   // No row in `tabs` -> no owner -> DEFAULT_TAB_PERMISSION, as before.
   assert.equal(effectivePermission(user, 'tab_01NOOWNER'), 'control');
   assert.equal(effectivePermission(other, 'tab_01NOOWNER'), 'control');
+});
+
+test('authz: a tab nobody owns can be closed by the person looking at it', () => {
+  /**
+   * The reported bug: a tab an extension or a redirect opened arrives with no
+   * owner, and "only the owner may close it" then means "only a role admin may
+   * close it" - so the person staring at the tab could not get rid of it.
+   */
+  assert.ok(canCloseTab(user, OWNED, null), 'an unowned tab is closable');
+  assert.ok(canCloseTab(other, OWNED, null), 'by anyone whose role allows closing');
+  assert.ok(canRenameTab(user, OWNED, null), 'and renamable');
+
+  // An owned tab is still the owner's alone.
+  assert.ok(canCloseTab(user, OWNED, user.id), 'the owner can close their own tab');
+  assert.equal(canCloseTab(other, OWNED, user.id), false, "but nobody else can");
+  assert.equal(canRenameTab(other, OWNED, user.id), false);
+
+  // Admins can always clean up; viewers can never close anything.
+  assert.ok(canCloseTab(admin, OWNED, user.id));
+  assert.equal(canCloseTab(viewer, OWNED, null), false, 'a viewer cannot close even an unowned tab');
 });

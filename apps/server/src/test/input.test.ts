@@ -200,3 +200,26 @@ test('input: the last actor on a tab is remembered, and expires', async () => {
   input.dropTab('tab_01A');
   assert.equal(input.lastActor('tab_01A'), null, 'forgotten when the tab closes');
 });
+
+test('arbiter: who has been active lately, for attributing a tab nobody asked for', async () => {
+  /**
+   * An extension can open a tab with no opener and no requester. The only clue
+   * left is who has been doing anything at all - and that clue is only usable
+   * when exactly one person has, which is what this exposes.
+   */
+  const { input } = harness();
+  assert.deepEqual(input.recentActors(), [], 'nobody has touched anything yet');
+
+  input.submit(key('tab_01A', 'a'), 'user_A', 'conn_A');
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(input.recentActors(), ['user_A'], 'one active person is attributable');
+
+  input.submit(key('tab_01B', 'b'), 'user_B', 'conn_B');
+  await new Promise((r) => setTimeout(r, 5));
+  const both = input.recentActors();
+  assert.equal(both.length, 2, 'two active people: a caller must not guess between them');
+  assert.equal(both[0], 'user_B', 'most recent first');
+
+  // The window is what makes it a clue rather than a memory.
+  assert.deepEqual(input.recentActors(0), [], 'nothing counts outside the window');
+});

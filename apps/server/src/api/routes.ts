@@ -239,6 +239,12 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
          pixels, so its value is mirrored into the title below. -->
     <input id="p" placeholder="paste target" aria-label="paste target"
            style="position:fixed;left:20px;top:20px;width:360px;height:36px;font-size:16px">
+    <!-- rel=noopener makes the new tab have no opener, which is how a tab from
+         an extension or a redirect arrives: nobody asked for it and nothing
+         links it back. Used to test that such a tab still gets an owner. -->
+    <a id="orphan" href="/selftest?from=noopener" target="_blank" rel="noopener"
+       style="position:fixed;left:20px;top:70px;width:360px;height:30px;font:16px system-ui;color:#9cf;background:#222;display:block">
+       open an orphan tab</a>
     <div id="t">--</div>
     <div id="n" style="font-size:.45em;opacity:.75">repaints: 0</div>
     <div id="bar" style="margin-top:.6em;height:22px;width:60vw;background:linear-gradient(90deg,#0ea5e9,#a855f7,#f59e0b);border-radius:11px"></div>

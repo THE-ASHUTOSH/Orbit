@@ -255,6 +255,24 @@ export class InputManager {
    * Who was last interacting with a tab. Used to decide whose screen should
    * follow a popup that tab opened - a click is the only evidence available.
    */
+  /**
+   * Everyone who has sent input to any tab recently, most recent first.
+   *
+   * Used to attribute a tab that Chromium opened with no opener and no
+   * requester - an extension acting on its own. Attribution then only happens
+   * when exactly one person has been active, so a guess is never made while two
+   * people are working.
+   */
+  recentActors(withinMs = 15_000): string[] {
+    const now = Date.now();
+    const seen = new Map<string, number>();
+    for (const { userId, at } of this.lastActorByTab.values()) {
+      if (now - at > withinMs) continue;
+      seen.set(userId, Math.max(seen.get(userId) ?? 0, at));
+    }
+    return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([userId]) => userId);
+  }
+
   lastActor(tabId: string, withinMs = 10_000): string | null {
     const entry = this.lastActorByTab.get(tabId);
     return entry && Date.now() - entry.at <= withinMs ? entry.userId : null;

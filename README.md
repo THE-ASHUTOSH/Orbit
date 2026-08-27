@@ -104,7 +104,7 @@ panel is also where anyone opens an extension's popup or options page.
 
 | Command | What it does |
 |---|---|
-| `./orbit test` | full suite: 109 tests, including real-Chromium integration |
+| `./orbit test` | full suite: 112 tests, including real-Chromium integration |
 | `./orbit bench [users] [tabs] [secs]` | latency and throughput benchmark |
 | `./orbit stress [users] [tabs]` | stress, races and abuse, with pass/fail invariants |
 | `./orbit dev` | run from source without Docker (API `:3030`, Vite `:5173`) |
@@ -155,6 +155,17 @@ is and get one button — *Ask <name> for control* — which puts a prompt in fr
 you wherever you are looking, with **Give control** or **Keep it to myself**.
 Granting takes effect immediately, no reload. Nobody else can close or rename
 your tab either; control, once given, is permission to type, not to dispose of it.
+
+Closing a tab puts you back on the one you came from, not on whichever tab is
+first — which is what makes a redirect into a new tab feel like a detour rather
+than a place you get stranded. The trail is per person, so nobody else's view
+moves.
+
+A tab that arrives with **nobody** attached to it — one an extension opened for
+itself, or a redirect with no trail back — belongs to whoever was working at the
+time, and if even that is unclear it belongs to everyone: it is followed, and it
+can be closed by the person looking at it. Ownership restricts tabs that *have* an
+owner, never tabs that have none.
 Set `TAB_OWNERSHIP=false` for the older free-for-all, where any tab is anyone's
 to drive.
 
@@ -203,19 +214,30 @@ from a page; mapping them would, at best, do nothing and, in `Ctrl+W`'s case,
 close your own tab. They are matched by physical key, so Option+T is still "new
 tab" on macOS, where it types "†".
 
+On Windows and Linux the modifier is **Alt**; on a Mac it is **Option** (⌥) — the
+same physical key, and Orbit's menus and on-screen hints name whichever one you
+are actually using.
+
 | Shortcut | Action |
 | --- | --- |
-| `Alt+T` | New tab |
-| `Alt+Shift+T` | Reopen the tab you just closed |
-| `Alt+W` | Close tab |
-| `Alt+D` | Focus the address bar |
-| `Alt+1`…`Alt+8` / `Alt+9` | Nth tab / last tab |
-| `Alt+←` / `Alt+→` | Back / forward |
+| `Alt`/`⌥`+`T` | New tab |
+| `Alt`/`⌥`+`Shift`+`T` | Reopen the tab you just closed |
+| `Alt`/`⌥`+`W` | Close tab |
+| `Alt`/`⌥`+`D` | Focus the address bar |
+| `Alt`/`⌥`+`1`…`8` / `9` | Nth tab / last tab |
+| `Alt`/`⌥`+`←` / `→` | Back / forward |
 | `F5`, `Ctrl+R` | Reload |
 | `Ctrl+±`, `Ctrl+0` | Zoom in/out, reset |
-| `Alt+K` | Capture the keyboard for this tab (see below) |
+| `Alt`/`⌥`+`F` | Full screen |
+| `Alt`/`⌥`+`K` | Capture the keyboard for this tab (see below) |
 
-**Keyboard capture** — `Alt+K`, or **⋮ → Capture keyboard**, for the chords your
+**Full screen** — `Alt+F` (`⌥F` on a Mac), or **⋮ → Full screen**. Tab bar, toolbar and status bar
+step aside and the page takes the whole display, with one dimmed *Leave full
+screen* pill in the corner to come back (the same chord and `Esc` work too). Not just a
+CSS trick: the stage grows, so Orbit asks the server for a bigger stream and the
+picture gets sharper rather than scaled up.
+
+**Keyboard capture** — `Alt+K` (`⌥K` on a Mac), or **⋮ → Capture keyboard**, for the chords your
 own browser normally keeps: `⌘T`, `⌘W`, `⌘L`, `⌘1`…`⌘9`, `Escape`. While it is on,
 those go to the shared browser instead: `⌘T` opens a tab *in Orbit*, `⌘W` closes
 one there, and an extension bound to `⌘⇧H` finally gets its key.
@@ -403,7 +425,7 @@ About 9,000 lines of TypeScript and 1,800 lines of documentation.
 
 ## Tests
 
-`./orbit test` runs **109 tests**, including an integration suite against a real
+`./orbit test` runs **112 tests**, including an integration suite against a real
 Chromium:
 
 - **unit** — scrypt hashing and timing, session cookie signing and tampering, the
@@ -455,8 +477,8 @@ soak, and a `SIGKILL` of Chromium mid-stream. Results are written to
 (two independent contexts standing in for two machines): sign-in, streaming and
 live pixels, tab create/switch/close, bookmarking a page and finding it in the
 panel, address-bar suggestions from history, the right-click menu,
-`Alt+T`/`Alt+W`, a copy-and-paste round trip through the accelerator key, and the
-per-tab keyboard capture toggle, and the ownership flow end to end between two
+`Alt+T`/`Alt+W`, a copy-and-paste round trip through the accelerator key, the
+per-tab keyboard capture toggle, the full-screen round trip, and the ownership flow end to end between two
 ordinary users. It is opt-in because Playwright downloads browser binaries:
 
 ```bash

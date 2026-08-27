@@ -73,4 +73,26 @@ export function canAdminTab(user: { id: string; role: Role }, tabId: string): bo
   return permits(effectivePermission(user, tabId), 'admin');
 }
 
+/**
+ * May this user close the tab?
+ *
+ * Ownership restricts a tab that *has* an owner. A tab nobody claimed - one an
+ * extension opened for itself, or a redirect that arrived with no attribution -
+ * stays everybody's, so the person looking at it can close it. Without this the
+ * rule read "only the owner may close it" and quietly meant "only a role admin
+ * may close it", which is how an extension's tab became impossible to get rid of.
+ */
+export function canCloseTab(user: { id: string; role: Role }, tabId: string, ownerId: string | null): boolean {
+  if (canAdminTab(user, tabId)) return true;
+  if (config.tabOwnership && ownerId) return false;
+  return roleCan(user.role, 'tab.close');
+}
+
+/** Same shape for the label: the owner's to organise, anyone's if unowned. */
+export function canRenameTab(user: { id: string; role: Role }, tabId: string, ownerId: string | null): boolean {
+  if (canAdminTab(user, tabId)) return true;
+  if (config.tabOwnership && ownerId) return false;
+  return canControlTab(user, tabId) && roleCan(user.role, 'tab.rename');
+}
+
 export const outranks = (a: Role, b: Role) => ROLE_RANK[a] > ROLE_RANK[b];

@@ -144,6 +144,11 @@ test('shortcuts: Alt chords are matched by physical key, so they work on macOS',
     shortcutForKey({ code: 'KeyK', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }),
     'toggleCapture',
   );
+  // Full screen is on Alt+F, not F11: F11 belongs to the host browser.
+  assert.equal(
+    shortcutForKey({ code: 'KeyF', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }),
+    'toggleFullscreen',
+  );
 });
 
 test('shortcuts: nothing without Alt, and nothing when Ctrl or Command is also held', () => {

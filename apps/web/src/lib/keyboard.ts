@@ -33,12 +33,27 @@ export const fullCaptureAvailable = (): boolean => typeof keyboard()?.lock === '
 
 export type CaptureMode = 'locked' | 'partial';
 
+/**
+ * Take the whole screen. Must be called from a user gesture.
+ *
+ * Shared by keyboard capture (which needs fullscreen to hold a lock) and by
+ * full-screen mode (which wants the pixels) - hence one primitive rather than
+ * two callers each fighting over the same document-level state.
+ */
+export async function enterFullscreen(element: HTMLElement): Promise<boolean> {
+  if (document.fullscreenElement) return true;
+  await element.requestFullscreen?.().catch(() => {});
+  return !!document.fullscreenElement;
+}
+
+export async function exitFullscreen(): Promise<void> {
+  if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+}
+
 /** Start capturing. Must be called from a user gesture. */
 export async function captureKeyboard(element: HTMLElement): Promise<CaptureMode> {
-  if (!document.fullscreenElement) {
-    // A rejection here is not fatal: partial capture still works unfullscreened.
-    await element.requestFullscreen?.().catch(() => {});
-  }
+  // A rejection is not fatal: partial capture still works unfullscreened.
+  await enterFullscreen(element);
   const lock = keyboard()?.lock;
   if (!lock || !document.fullscreenElement) return 'partial';
   try {
@@ -49,8 +64,11 @@ export async function captureKeyboard(element: HTMLElement): Promise<CaptureMode
   }
 }
 
-/** Stop capturing, and give the screen back if we took it. */
-export async function releaseKeyboard(): Promise<void> {
+/**
+ * Stop capturing. The screen goes back too, unless full-screen mode is the one
+ * holding it - releasing the keyboard should not yank the view out from under it.
+ */
+export async function releaseKeyboard(keepScreen = false): Promise<void> {
   keyboard()?.unlock?.();
-  if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+  if (!keepScreen) await exitFullscreen();
 }

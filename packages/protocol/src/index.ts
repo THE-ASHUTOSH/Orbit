@@ -499,6 +499,9 @@ export function shortcutForKey(e: {
   const digit = /^Digit([1-9])$/.exec(e.code)?.[1];
   if (digit) return `selectTab:${digit}`;
   switch (e.code) {
+    case 'KeyF':
+      // Full screen. Alt, not F11: F11 is the host browser's and never reaches us.
+      return 'toggleFullscreen';
     case 'KeyK':
       // Keyboard capture. Alt+K works while captured too, which is what makes it
       // a usable way out: the host browser's own chords are unavailable then.

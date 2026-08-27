@@ -97,10 +97,14 @@ const pageServer = http.createServer((req, res) => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function waitFor<T>(what: string, fn: () => T | undefined | null | false, timeoutMs = 15_000): Promise<T> {
+async function waitFor<T>(
+  what: string,
+  fn: () => T | undefined | null | false | Promise<T | undefined | null | false>,
+  timeoutMs = 15_000,
+): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const value = fn();
+    const value = await fn();
     if (value) return value as T;
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await sleep(25);
@@ -433,6 +437,30 @@ test('orbit: end to end', async (t) => {
     );
 
     carol.send({ type: 'tab.unsubscribe', tabId: tab2.tabId });
+  });
+
+  await t.test('a tab nobody owns is closable by an ordinary user', async () => {
+    /**
+     * The reported edge case: an extension or a redirect opens a tab that nobody
+     * asked for, so it has no owner - and "only the owner may close it" then
+     * locked it to role admins. The browser's own first tab is exactly such a
+     * tab, so it is what this uses.
+     */
+    const unowned = (await stateOf(base, adminCookie)).tabs.find((t) => t.ownerId === null);
+    assert.ok(unowned, 'the browser starts with a tab nobody claimed');
+
+    carol.send({ type: 'tab.close', tabId: unowned.tabId });
+    await waitFor(
+      'the unowned tab closes',
+      async () => !(await stateOf(base, adminCookie)).tabs.some((t) => t.tabId === unowned.tabId),
+      10_000,
+    );
+    // And it really was carol's doing, not a refusal she ignored.
+    assert.equal(
+      carol.seen('error').filter((e) => e.tabId === unowned.tabId).length,
+      0,
+      'closing an unowned tab is not refused',
+    );
   });
 
   await t.test('Test 8: two users control the same tab, server orders their input', async () => {

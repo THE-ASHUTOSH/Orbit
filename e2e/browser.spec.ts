@@ -466,6 +466,113 @@ test.describe('orbit UI', () => {
     }
   });
 
+  test('full screen hides Orbit and gives the page the whole display', async ({ page }) => {
+    await signIn(page);
+    const tabs = page.locator('div[title*="tab_"]');
+    const bar = await addressBar(page);
+    const exit = page.getByRole('button', { name: /Leave full screen/ });
+    const fullscreen = () => page.evaluate(() => !!document.fullscreenElement);
+
+    await expect(tabs.first()).toBeVisible();
+
+    await page.getByRole('button', { name: 'Menu' }).click();
+    await page.getByRole('menuitem', { name: /Full screen/ }).click();
+
+    // Orbit's own chrome steps aside, and the display is actually taken.
+    await expect(exit).toBeVisible();
+    await expect(tabs).toHaveCount(0);
+    await expect(bar).toHaveCount(0);
+    expect(await fullscreen()).toBe(true);
+    // The page is still there and still streaming.
+    await expect(page.locator('canvas')).toBeVisible();
+
+    // And back, by the on-screen way out.
+    await exit.click();
+    await expect(tabs.first()).toBeVisible();
+    await expect(bar).toBeVisible();
+    await expect.poll(fullscreen, { timeout: 5_000 }).toBe(false);
+
+    // Alt+F does the same round trip without touching the mouse.
+    await stage(page).click({ position: { x: 60, y: 60 } });
+    await page.keyboard.press('Alt+f');
+    await expect(exit).toBeVisible();
+    await page.keyboard.press('Alt+f');
+    await expect(exit).toHaveCount(0);
+    await expect.poll(fullscreen, { timeout: 5_000 }).toBe(false);
+  });
+
+  test('a tab nobody asked for is still yours: followed, and closable', async ({ page }) => {
+    /**
+     * The reported edge case. A tab that arrives with no opener and nobody
+     * asking - an extension acting on its own, or a redirect - used to end up
+     * owned by nobody: the view did not follow it, and "only the owner may close
+     * it" then meant only an admin could get rid of it.
+     *
+     * Reproduced deterministically with a rel=noopener link on the self-test
+     * page: that is exactly a new tab with no opener, without depending on a
+     * chord reaching the browser process.
+     */
+    await signIn(page);
+    const tabs = page.locator('div[title*="tab_"]');
+
+    const whereAmI = () =>
+      page.evaluate(async () => {
+        const [{ state }, me] = await Promise.all([
+          (await fetch('/api/state')).json(),
+          (await fetch('/api/auth/me')).json(),
+        ]);
+        const self = (state.users as { userId: string; currentTabId: string | null }[]).find(
+          (u) => u.userId === me.user.userId,
+        );
+        const tab = (state.tabs as { tabId: string; ownerId: string | null }[]).find(
+          (t) => t.tabId === self?.currentTabId,
+        );
+        return { onTab: self?.currentTabId ?? null, owned: !!tab?.ownerId };
+      });
+
+    // Own tab, own page: nothing an earlier test left behind can interfere.
+    const before = await tabs.count();
+    await page.getByRole('button', { name: 'New tab' }).click();
+    await expect(tabs).toHaveCount(before + 1);
+    await tabs.last().click();
+    await (await addressBar(page)).fill(REMOTE_SELFTEST);
+    await (await addressBar(page)).press('Enter');
+    await expect.poll(() => canvasHasContent(page), { timeout: 30_000 }).toBe(true);
+
+    const started = await whereAmI();
+
+    // Click the noopener link at (20,70) on the page, mapped to the drawn frame.
+    const canvas = (await page.locator('canvas').boundingBox())!;
+    const frameWidth = await page.evaluate(async () => {
+      const { state } = await (await fetch('/api/state')).json();
+      return (state.tabs as { url: string; width: number }[]).find((t) => t.url.includes('selftest'))?.width ?? 1;
+    });
+    const fit = canvas.width / frameWidth;
+    await page.mouse.click(canvas.x + 100 * fit, canvas.y + 85 * fit);
+    await expect(tabs).toHaveCount(before + 2);
+
+    // The view follows it, and it has an owner rather than being nobody's.
+    await expect.poll(async () => (await whereAmI()).onTab !== started.onTab, { timeout: 15_000 }).toBe(true);
+    expect((await whereAmI()).owned).toBe(true);
+
+    // And it can be closed by the person looking at it.
+    const opened = tabs.last();
+    await opened.hover();
+    await opened.getByRole('button', { name: 'Close tab' }).click();
+    await expect(tabs).toHaveCount(before + 1);
+
+    /**
+     * Closing it comes back to the page it came from - not to whichever tab
+     * happens to be first, which is where it used to land.
+     */
+    await expect.poll(async () => (await whereAmI()).onTab, { timeout: 15_000 }).toBe(started.onTab);
+
+    const mine = tabs.last();
+    await mine.hover();
+    await mine.getByRole('button', { name: 'Close tab' }).click();
+    await expect(tabs).toHaveCount(before);
+  });
+
   test('rejects a bad password without revealing whether the user exists', async ({ page }) => {
     await page.goto('/');
     await page.getByLabel('Username').fill('definitely-not-a-user');

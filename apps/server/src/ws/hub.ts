@@ -26,7 +26,15 @@ import { log } from '../log.js';
 import { id } from '../ids.js';
 import { audit, getUser, grantTab, lastClosedTab, recordVisit, touchUser, userColorIndex, type UserRow } from '../db.js';
 import { sessionFromRequest } from '../auth/session.js';
-import { canAdminTab, canControlTab, canViewTab, effectivePermission, roleCan } from '../auth/permissions.js';
+import {
+  canAdminTab,
+  canCloseTab,
+  canControlTab,
+  canRenameTab,
+  canViewTab,
+  effectivePermission,
+  roleCan,
+} from '../auth/permissions.js';
 import { isOriginAllowed } from '../api/origin.js';
 import type { Runtime } from '../runtime.js';
 import type { FrameSink } from '../browser/StreamManager.js';
@@ -113,10 +121,26 @@ export class Hub {
       // Explicit creates carry their requester; a popup is attributed to whoever
       // was last driving the tab that opened it.
       const opener = tab.openerTabId ? this.rt.tabs.get(tab.openerTabId) : undefined;
-      // Whoever was just driving the opener, and failing that whoever owns it: a
-      // popup from your tab is yours even if you had not touched it for a while.
+      /**
+       * Who this tab belongs to, in order of how much we actually know:
+       *
+       * 1. the client that asked for it;
+       * 2. whoever was just driving the tab that opened it;
+       * 3. whoever owns the tab that opened it - a popup from your tab is yours
+       *    even if you had not touched it for a while;
+       * 4. failing all that, the only person who has been active at all.
+       *
+       * Step 4 is what rescues a tab an extension opened for itself: there is no
+       * opener and no requester, so without it the tab belongs to nobody and
+       * nobody's view follows it. It is used only when exactly one person has
+       * been active, so it never guesses between two people.
+       */
+      const active = this.rt.input.recentActors();
       const openedBy =
-        tab.createdBy ?? (tab.openerTabId ? this.rt.input.lastActor(tab.openerTabId) : null) ?? opener?.createdBy ?? null;
+        tab.createdBy ??
+        (tab.openerTabId ? this.rt.input.lastActor(tab.openerTabId) : null) ??
+        opener?.createdBy ??
+        (active.length === 1 ? active[0]! : null);
       // Attribution is also ownership: a tab a link opened belongs to the person
       // who clicked the link, not to nobody.
       if (openedBy && !tab.createdBy) this.rt.tabs.claim(tab.tabId, openedBy);
@@ -429,17 +453,10 @@ export class Hub {
       }
 
       case 'tab.close': {
-        /**
-         * Closing someone's tab is not a lesser act than typing in it.
-         *
-         * With ownership on, only the owner (or an admin) may close a tab -
-         * the role capability alone is not enough, or "nobody else has access"
-         * would still leave everyone able to throw the tab away.
-         */
-        const mayClose = config.tabOwnership
-          ? canAdminTab(conn.user, msg.tabId)
-          : canAdminTab(conn.user, msg.tabId) || roleCan(conn.user.role, 'tab.close');
-        if (!mayClose) return conn.fail('forbidden', msg.tabId);
+        // Closing someone's tab is not a lesser act than typing in it - but a
+        // tab nobody owns belongs to whoever is looking at it. See canCloseTab.
+        if (!canCloseTab(conn.user, msg.tabId, this.rt.tabs.get(msg.tabId)?.createdBy ?? null))
+          return conn.fail('forbidden', msg.tabId);
         audit('tab.close', { userId: conn.userId, tabId: msg.tabId });
         void this.rt.tabs.close(msg.tabId).catch((err) => this.failAsync(conn, err, msg.type, msg.tabId));
         return;
@@ -460,7 +477,7 @@ export class Hub {
 
       case 'tab.rename': {
         // The label is part of how the owner organises their own tabs.
-        if (config.tabOwnership ? !canAdminTab(conn.user, msg.tabId) : !canControlTab(conn.user, msg.tabId))
+        if (!canRenameTab(conn.user, msg.tabId, this.rt.tabs.get(msg.tabId)?.createdBy ?? null))
           return conn.fail('forbidden', msg.tabId);
         this.rt.tabs.rename(msg.tabId, msg.label);
         return;

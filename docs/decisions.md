@@ -342,6 +342,14 @@ that actually work through a stream.
   tab there - which Orbit adopts, redirected from `chrome://newtab` to the same
   home page the "+" button uses.
 
+- **Full screen shares one primitive with capture.** Both want the display, and
+  fullscreen is a property of the document, not of a component - so there is a
+  single `enterFullscreen`/`exitFullscreen` pair, and releasing the keyboard
+  leaves the screen alone when full-screen mode is the one holding it. Leaving
+  fullscreen by any route the browser owns (`Esc`, `F11`, the OS) ends both,
+  which is why the state is reconciled from `fullscreenchange` rather than
+  assumed from whoever asked.
+
 **Tradeoffs.** The shortcuts are not the ones muscle memory expects, which is
 why they are listed in the README and in the menu. Copy from the page uses the
 selection the probe already reported rather than a synthetic `Ctrl+C`, and paste

@@ -21,15 +21,7 @@ import {
   type TabInfo,
 } from '@orbit/protocol';
 import type { BrowserSocket } from '../lib/socket';
-
-/**
- * Whether Command is this viewer's accelerator key. Chromium's own
- * userAgentData is preferred; navigator.platform is the fallback that still
- * works everywhere.
- */
-const APPLE = /mac|iphone|ipad|ipod/i.test(
-  (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? '',
-);
+import { IS_APPLE as APPLE, altChord } from '../lib/platform';
 
 interface Props {
   socket: BrowserSocket;
@@ -448,10 +440,10 @@ export function Viewport({
         {captured && (
           <button
             onClick={onReleaseCapture}
-            title="Release the keyboard (Alt+K)"
+            title={`Release the keyboard (${altChord('K')})`}
             className="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-line-2 bg-panel/90 px-3 py-1 text-[11px] text-ink-2 shadow-lg backdrop-blur hover:bg-elev"
           >
-            ⌨ Keyboard captured{captured === 'partial' ? ' (partly)' : ''} · Alt+K to release
+            ⌨ Keyboard captured{captured === 'partial' ? ' (partly)' : ''} · {altChord('K')} to release
           </button>
         )}
 

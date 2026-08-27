@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ThemeChoice } from '../lib/theme';
 import { ZoomControl } from './ZoomControl';
+import { altChord } from '../lib/platform';
 
 interface Props {
   zoom: number;
@@ -27,6 +28,8 @@ interface Props {
   onCycleTheme: () => void;
   showMetrics: boolean;
   onToggleMetrics: () => void;
+  fullscreen: boolean;
+  onToggleFullscreen: () => void;
   captured: boolean;
   captureMode: 'locked' | 'partial' | null;
   onToggleCapture: () => void;
@@ -55,6 +58,8 @@ export function Menu({
   onCycleTheme,
   showMetrics,
   onToggleMetrics,
+  fullscreen,
+  onToggleFullscreen,
   captured,
   captureMode,
   onToggleCapture,
@@ -121,8 +126,18 @@ export function Menu({
           </Item>
 
           <Divider />
-          {/* Not `run`: capture needs the click itself as its user gesture, and
+          {/* Neither of these uses `run`: both need the click itself as their
+              user gesture (fullscreen may only be requested from one), and
               closing the menu first would take the focus with it. */}
+          <Item
+            onClick={() => {
+              setOpen(false);
+              onToggleFullscreen();
+            }}
+            hint={fullscreen ? 'on' : 'off'}
+          >
+            Full screen · {altChord('F')}
+          </Item>
           <Item
             onClick={() => {
               setOpen(false);
@@ -130,7 +145,7 @@ export function Menu({
             }}
             hint={captured ? (captureMode === 'locked' ? 'on' : 'partial') : 'off'}
           >
-            Capture keyboard · Alt+K
+            Capture keyboard · {altChord('K')}
           </Item>
 
           <Divider />

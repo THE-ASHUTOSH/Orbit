@@ -103,9 +103,9 @@ that matter most:
 |---|---|---|
 | `SESSION_SECRET` | *(required)* | signs session cookies; changing it logs everyone out |
 | `ADMIN_PASSWORD` | *(required)* | bootstrap admin, first start only |
-| `VIEWPORT_WIDTH` / `_HEIGHT` | 1280×720 | pixels streamed per tab |
-| `MAX_FPS` | 30 | CPU and bandwidth, linearly |
-| `STREAM_QUALITY` | 70 | JPEG quality 1-100 |
+| `VIEWPORT_WIDTH` / `_HEIGHT` | 1920×1080 | pixels streamed per tab; 1280×720 roughly halves CPU and bandwidth |
+| `MAX_FPS` | 45 | CPU and bandwidth, linearly; 30 is fine for reading |
+| `STREAM_QUALITY` | 100 | JPEG quality 1-100. LAN-friendly; use 70-80 over the Internet |
 | `MAX_TABS` / `MAX_USERS` | 20 / 50 | resource ceilings |
 | `DEFAULT_TAB_PERMISSION` | `control` | `view` makes control opt-in per tab |
 | `TAB_OWNERSHIP` | `true` | a tab belongs to whoever opened it; others watch until granted control. `false` restores the shared free-for-all |
