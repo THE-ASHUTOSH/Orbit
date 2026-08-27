@@ -40,9 +40,14 @@ logins, one profile.
 ./orbit up
 ```
 
-First run writes `.env` with a random `SESSION_SECRET` and an admin password you
-type, builds the image, waits for the browser to be healthy, and prints the URL
-to share. Open it from any device on the network and sign in.
+That is the whole setup. It starts the Docker engine if it is not running,
+writes `.env` on first run — a random `SESSION_SECRET`, an admin password you
+type, and **the same settings this deployment runs on** rather than a bare
+minimum — builds the image, waits for the browser to be healthy, and prints the
+URL to share. Open it from any device on the network and sign in.
+
+`./orbit env --template` shows exactly what that file will contain before you
+commit to it.
 
 Prefer doing it by hand? `cp .env.example .env`, set `SESSION_SECRET`
 (`openssl rand -hex 32`) and `ADMIN_PASSWORD`, then `docker compose up --build`.
@@ -62,7 +67,7 @@ Everything runs through one script. `./orbit help` prints this list.
 
 | Command | What it does |
 |---|---|
-| `./orbit up` | build, start, wait for healthy, print the LAN URL |
+| `./orbit up` | start Docker if needed, write `.env` on first run, build, start, wait for healthy, print the LAN URL |
 | `./orbit status` | container state, health, live metrics, URLs |
 | `./orbit url` | just the addresses to share |
 | `./orbit logs [lines]` | follow the structured JSON log |
@@ -107,6 +112,7 @@ panel is also where anyone opens an extension's popup or options page.
 | `./orbit test` | full suite: 118 tests, including real-Chromium integration |
 | `./orbit bench [users] [tabs] [secs]` | latency and throughput benchmark |
 | `./orbit stress [users] [tabs]` | stress, races and abuse, with pass/fail invariants |
+| `./orbit env [--template]` | show the `.env` in use (secrets hidden), or the one a fresh run would write |
 | `./orbit dev` | run from source without Docker (API `:3030`, Vite `:5173`) |
 | `npm run typecheck` | TypeScript across every workspace |
 | `npm run build` | build protocol, server and web |

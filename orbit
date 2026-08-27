@@ -44,6 +44,92 @@ lan_ip() {
 
 pretty() { if command -v python3 >/dev/null 2>&1; then python3 -m json.tool 2>/dev/null || cat; else cat; fi; }
 
+# Start the Docker engine if it is not already up.
+#
+# Every command here is one `docker` call away from being useless, and "Cannot
+# connect to the Docker daemon" is a worse first experience than a ten-second
+# wait. Only ever *starts* it - nothing here stops Docker, because it is probably
+# running other people's containers too.
+ensure_docker() {
+  command -v docker >/dev/null 2>&1 || die "docker is not installed - see https://docs.docker.com/get-docker/"
+  docker info >/dev/null 2>&1 && return 0
+
+  local how=""
+  case "$(uname -s)" in
+    Darwin)
+      # Whichever runtime is installed, in the order it is likely to be.
+      if [ -d /Applications/Docker.app ]; then how="open -ga Docker"
+      elif [ -d /Applications/OrbStack.app ]; then how="open -ga OrbStack"
+      elif command -v colima >/dev/null 2>&1; then how="colima start"
+      fi
+      ;;
+    Linux)
+      # Without sudo first: rootless Docker and user services need no escalation.
+      command -v systemctl >/dev/null 2>&1 &&
+        how="systemctl --user start docker || sudo -n systemctl start docker"
+      ;;
+  esac
+  [ -n "$how" ] || die "the Docker engine is not running, and I cannot tell how to start it here - start it and try again"
+
+  info "the Docker engine is not running - starting it"
+  eval "$how" >/dev/null 2>&1 || true
+
+  local waited=0 limit="${ORBIT_DOCKER_WAIT:-90}"
+  while [ "$waited" -lt "$limit" ]; do
+    docker info >/dev/null 2>&1 && { info "Docker is up (${waited}s)"; return 0; }
+    sleep 2
+    waited=$((waited + 2))
+    # One line every ten seconds, not one per second: a cold start takes a while.
+    [ $((waited % 10)) -eq 0 ] && printf '  still waiting for Docker (%ss)\n' "$waited"
+  done
+  die "Docker did not come up within ${limit}s - start it manually and try again"
+}
+
+# The .env this project runs on. Printed by `./orbit env`, written by ensure_env.
+#
+# Deliberately the settings of the working deployment rather than a bare minimum:
+# a fresh clone should behave like the one that was tuned, not like a different
+# product. Secrets are the only things generated or asked for.
+env_template() {
+  cat <<TEMPLATE
+# Orbit configuration, written by ./orbit up. The same settings this project runs
+# on; .env.example documents what each one costs and how to trade it down.
+SESSION_SECRET=${1}
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=${2}
+LOG_LEVEL=info
+
+# Streaming: 1080p at 45fps, quality 100, pinned. Right for a LAN; over the
+# Internet drop STREAM_QUALITY to 70-80 and MAX_FPS to 30.
+VIEWPORT_WIDTH=1920
+VIEWPORT_HEIGHT=1080
+STREAM_QUALITY=100
+MAX_FPS=45
+MAX_VIEWPORT_WIDTH=2560
+MAX_VIEWPORT_HEIGHT=1440
+PIN_VIEWPORT=true
+DEVICE_SCALE_FACTOR=1
+
+# Container ceilings. 20 tabs and 40 viewers peaked at 4.2GB of this.
+MEMORY_LIMIT=6g
+CPU_LIMIT=6.0
+
+HOME_URL=https://www.google.com
+
+# A tab belongs to whoever opened it; everyone else watches until asked.
+TAB_OWNERSHIP=true
+
+# Keep sign-ins across ./orbit restart, including on sites that use session
+# cookies. This overrides what those sites asked for - see docs/security.md.
+PERSIST_SESSION_COOKIES=true
+
+# Real Chrome DevTools for admins. It is a raw CDP channel to a page, so whoever
+# opens it can read that page's cookies: fine for the person running this, worth
+# setting false if you do not trust every admin.
+DEVTOOLS_ENABLED=true
+TEMPLATE
+}
+
 # Create .env on first run: a random signing secret, and an admin password the
 # operator types rather than one baked into a file in git history.
 ensure_env() {
@@ -55,12 +141,9 @@ ensure_env() {
   read -rsp "  again: " pw2; echo
   [ "$pw" = "$pw2" ] || die "passwords did not match"
   [ "${#pw}" -ge 8 ] || die "password must be at least 8 characters"
-  { grep -vE '^(SESSION_SECRET|ADMIN_PASSWORD)=' .env.example
-    echo "SESSION_SECRET=$(openssl rand -hex 32)"
-    echo "ADMIN_PASSWORD=${pw}"
-  } > .env
+  env_template "$(openssl rand -hex 32)" "$pw" > .env
   chmod 600 .env
-  info "wrote .env (chmod 600)"
+  info "wrote .env (chmod 600) - the same settings this project runs on"
 }
 
 load_env() {
@@ -313,6 +396,16 @@ cmd_restart() {
   info "browser restarting - clients reattach on their own"
 }
 
+# Show the .env in use, or the one a fresh run would write.
+cmd_env() {
+  if [ -f .env ] && [ "${1:-}" != "--template" ]; then
+    info ".env exists; showing it with secrets hidden (--template shows what a fresh one would be)"
+    sed -E 's/^(SESSION_SECRET|ADMIN_PASSWORD)=.*/\1=<hidden>/' .env
+    return 0
+  fi
+  env_template "<generated: openssl rand -hex 32>" "<the password you type>"
+}
+
 cmd_stress() {
   load_env
   local base="${BASE_URL:-$LOCAL}"
@@ -381,6 +474,8 @@ orbit - a shared Chromium for your LAN
 
   ./orbit test                      full test suite (needs Chrome on this machine)
   ./orbit bench [users] [tabs] [s]  latency and throughput benchmark
+  ./orbit stress [users] [tabs]     stress, races and abuse, with pass/fail invariants
+  ./orbit env [--template]          show the .env in use, or the one a fresh run would write
   ./orbit dev                       run from source, without Docker
 
   ./orbit backup [file]             tar the data volume (brief browser stop)
@@ -393,7 +488,14 @@ First run creates .env with a random SESSION_SECRET and an admin password you ty
 USAGE
 }
 
+# Anything that talks to a running container needs the engine up first. Not
+# down or kill: starting Docker only to stop something would be absurd.
+case "${1:-}" in
+  up|status|restart|logs|ext|user|users|kick|backup|restore|bench|stress) ensure_docker ;;
+esac
+
 case "${1:-help}" in
+  env)      shift; cmd_env "$@" ;;
   up)       shift; cmd_up "$@" ;;
   down)     shift; cmd_down "$@" ;;
   kill)     shift; cmd_kill "$@" ;;
