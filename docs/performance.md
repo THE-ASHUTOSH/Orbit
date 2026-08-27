@@ -226,7 +226,7 @@ are the two dials that buy it back.
   real network transit. Point `BASE_URL` at the LAN address from another machine
   to include it.
 
-## Sharpness: what moves it, and what only looks like it does
+## Sharpness
 
 Measured on a text-heavy page at 1080p, on the reference machine.
 

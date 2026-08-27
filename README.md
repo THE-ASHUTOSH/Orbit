@@ -34,28 +34,81 @@ logins, one profile.
 
 ---
 
-## Quick start
+## Setup
+
+**You need:** Docker with Compose v2. About 4 CPUs and 4 GB free for the
+container (6 and 6 is comfortable). One machine on the network to run it on —
+that machine does all the work; everyone else just needs a browser.
+
+### 1. Start it
 
 ```bash
+git clone https://github.com/THE-ASHUTOSH/Orbit.git
+cd Orbit
 ./orbit up
 ```
 
-That is the whole setup. It starts the Docker engine if it is not running,
-writes `.env` on first run — a random `SESSION_SECRET`, an admin password you
-type, and **the same settings this deployment runs on** rather than a bare
-minimum — builds the image, waits for the browser to be healthy, and prints the
-URL to share. Open it from any device on the network and sign in.
+That is the whole setup. On the first run the script:
 
-`./orbit env --template` shows exactly what that file will contain before you
-commit to it.
+1. starts Docker if it is not already running,
+2. writes a `.env` for you — a random `SESSION_SECRET`, an admin password you
+   type in, and the settings this project actually runs on rather than a bare
+   minimum,
+3. builds the image (a few minutes once; later runs are seconds),
+4. waits until the browser inside is genuinely healthy,
+5. prints the two URLs — one for this machine, one for everyone else.
 
-Prefer doing it by hand? `cp .env.example .env`, set `SESSION_SECRET`
-(`openssl rand -hex 32`) and `ADMIN_PASSWORD`, then `docker compose up --build`.
-`./orbit` is a convenience wrapper, never a requirement.
+```
+open on this machine:  http://127.0.0.1:3030
+open on the LAN:       http://192.168.1.100:3030
+```
 
-**Requirements:** Docker with Compose v2, ~4 CPUs and 4 GB for the container (6/6
-is comfortable), one open inbound TCP port. No Internet connection is needed once
-the image is built.
+### 2. Open it
+
+Open the LAN address on any device on the same network — laptop, phone, tablet —
+and sign in as `admin` with the password you typed. Everyone can use it at the
+same time, each in their own tabs.
+
+### 3. Add the people you are sharing with
+
+```bash
+./orbit user priya          # prompts for a password; role defaults to user
+./orbit user sam viewer     # can watch, never type
+./orbit users               # list everyone
+```
+
+Roles: `admin` manages everything, `user` browses and opens tabs, `viewer` only
+watches. By default a tab belongs to whoever opened it — others can watch it and
+ask for control from the toolbar.
+
+### That is it
+
+`./orbit status` shows health and live metrics, `./orbit down` stops it and keeps
+all data, `./orbit up` brings it back.
+
+### If something does not work
+
+| Symptom | Fix |
+|---|---|
+| `docker: command not found` | install Docker Desktop (macOS/Windows) or Docker Engine (Linux), then re-run |
+| The LAN URL does not open from another device | allow inbound TCP on port 3030 in the host firewall; both devices must be on the same network |
+| Port 3030 is already taken | set `APP_PORT=3040` in `.env`, then `./orbit up` |
+| Forgot the admin password | `./orbit user <name> admin` makes another admin; `ADMIN_PASSWORD` only seeds the very first one |
+| Pages look soft on a retina screen | `DEVICE_SCALE_FACTOR=1.5` in `.env`, then `./orbit up` (see [Tuning](#tuning)) |
+| Anything else | [docs/troubleshooting.md](docs/troubleshooting.md) — symptom, cause, fix |
+
+### Doing it by hand instead
+
+`./orbit` is convenience, never a requirement:
+
+```bash
+cp .env.example .env         # then set SESSION_SECRET and ADMIN_PASSWORD
+docker compose up --build
+```
+
+`openssl rand -hex 32` generates a secret. `./orbit env --template` prints the
+exact `.env` the script would write, if you would rather read it first. No
+Internet is needed once the image is built.
 
 ---
 
@@ -109,7 +162,7 @@ panel is also where anyone opens an extension's popup or options page.
 
 | Command | What it does |
 |---|---|
-| `./orbit test` | full suite: 118 tests, including real-Chromium integration |
+| `./orbit test` | full suite: 121 tests, including real-Chromium integration |
 | `./orbit bench [users] [tabs] [secs]` | latency and throughput benchmark |
 | `./orbit stress [users] [tabs]` | stress, races and abuse, with pass/fail invariants |
 | `./orbit env [--template]` | show the `.env` in use (secrets hidden), or the one a fresh run would write |
@@ -339,13 +392,27 @@ fanned out, so four people watching one tab costs about the same as one.
 
 ### Tuning
 
+Two different knobs change "how it looks", and they are easy to mix up:
+
+- **`VIEWPORT_WIDTH/HEIGHT`** is the page's *size* in CSS pixels. Bigger fits
+  more content and makes everything look smaller.
+- **`DEVICE_SCALE_FACTOR`** is the page's *sharpness*: identical layout, drawn
+  with more real pixels. 1 to 3, fractions allowed.
+
 | Want | Change |
 |---|---|
 | Less bandwidth | `STREAM_QUALITY=80`, or a smaller `VIEWPORT_WIDTH/HEIGHT` |
 | Bigger text | `VIEWPORT_WIDTH=1600 VIEWPORT_HEIGHT=900` (less content, larger) |
-| Sharper | `VIEWPORT_WIDTH=2560 VIEWPORT_HEIGHT=1440` (more content, smaller) |
+| More content on screen | `VIEWPORT_WIDTH=2560 VIEWPORT_HEIGHT=1440` (smaller text) |
+| Sharper on a retina screen | `DEVICE_SCALE_FACTOR=1.5` (1.4–2.6× the bandwidth) |
 | Less CPU | `MAX_FPS=30` |
 | Smoother | `MAX_FPS=60` (also shortens the frame-pacing part of latency) |
+
+`DEVICE_SCALE_FACTOR` above 1 only helps clients whose screens have the pixels to
+show it — on an ordinary monitor it costs bandwidth and looks very slightly
+softer, because the frame is scaled back down on arrival. It is one setting for
+everyone and Chromium takes it at launch, so changing it restarts the browser.
+The measurements are in [docs/performance.md](docs/performance.md#sharpness).
 
 Then `./orbit up`. JPEG quality is close to free — 85→95 cost 27% bandwidth and
 no measurable latency.
@@ -402,6 +469,8 @@ that matter most:
 | `VIEWPORT_WIDTH` / `_HEIGHT` | `1280×720` | pixels streamed per tab |
 | `PIN_VIEWPORT` | `false` | `true` ignores client window size and always streams the above |
 | `STREAM_QUALITY` | `70` | JPEG quality 1–100 |
+| `DEVICE_SCALE_FACTOR` | `1` | sharpness: real pixels per CSS pixel, 1–3, fractions allowed |
+| `PERSIST_SESSION_COOKIES` | `false` | `true` keeps logins across `./orbit restart` |
 | `MAX_FPS` | `30` | CPU and bandwidth, linearly |
 | `CHROMIUM_HEADLESS` | `false` | headed on Xvfb; websites treat headless as unusual |
 | `DEVTOOLS_ENABLED` | `false` | admin DevTools — read the security doc first |
@@ -451,7 +520,7 @@ About 9,000 lines of TypeScript and 1,800 lines of documentation.
 
 ## Tests
 
-`./orbit test` runs **118 tests**, including an integration suite against a real
+`./orbit test` runs **121 tests**, including an integration suite against a real
 Chromium:
 
 - **unit** — scrypt hashing and timing, session cookie signing and tampering, the
