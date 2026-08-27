@@ -104,7 +104,7 @@ panel is also where anyone opens an extension's popup or options page.
 
 | Command | What it does |
 |---|---|
-| `./orbit test` | full suite: 112 tests, including real-Chromium integration |
+| `./orbit test` | full suite: 116 tests, including real-Chromium integration |
 | `./orbit bench [users] [tabs] [secs]` | latency and throughput benchmark |
 | `./orbit stress [users] [tabs]` | stress, races and abuse, with pass/fail invariants |
 | `./orbit dev` | run from source without Docker (API `:3030`, Vite `:5173`) |
@@ -173,6 +173,18 @@ to drive.
 no turn-taking. A per-tab server-side arbiter gives one authoritative order,
 coalesces mouse moves, and de-duplicates retries. Other people's cursors are
 drawn with their names.
+
+**A predictable picture.** One rule decides a tab's resolution - the configured
+size, the viewer's shape, the limits and the screen it is drawn on - so the same
+window always gets the same viewport, across new tabs and refreshes alike. It can
+never exceed the virtual screen the window lives on either: asking for more is
+what Chromium returns as a black frame, and zooming out or going full screen used
+to ask for exactly that. Every stream restart also pushes one frame immediately,
+so a page sitting still is never left blank.
+
+**It tells you when it is working.** A spinner in the tab and a thin strip across
+the top of the page while it loads - indeterminate, because Chromium reports
+"loading" or "not loading" and never a percentage.
 
 **Real input.** Mouse move/down/up/click/double-click/right-click/wheel/drag,
 touch, full keyboard with modifiers and shortcuts, IME composition, and paste.
@@ -425,7 +437,7 @@ About 9,000 lines of TypeScript and 1,800 lines of documentation.
 
 ## Tests
 
-`./orbit test` runs **112 tests**, including an integration suite against a real
+`./orbit test` runs **116 tests**, including an integration suite against a real
 Chromium:
 
 - **unit** — scrypt hashing and timing, session cookie signing and tampering, the

@@ -36,8 +36,16 @@ export function TabBar({ tabs, activeTabId, users, canCreate, onSelect, onClose,
             }`}
             title={`${tab.title || tab.url}\n${tab.url}\n${owner ? `opened by ${owner.displayName}\n` : ''}${tab.tabId}`}
           >
+            {/* A spinning ring, not a pulsing dot: a dot that fades in and out
+                reads as decoration, and people could not tell whether anything
+                was happening. This is the same shape every browser uses. */}
             {tab.loading ? (
-              <span className="size-2 shrink-0 animate-pulse rounded-full bg-sky-400" />
+              <span
+                role="status"
+                aria-label="Loading"
+                title="Loading…"
+                className="size-3 shrink-0 animate-spin rounded-full border-2 border-sky-400/30 border-t-sky-400"
+              />
             ) : (
               <span className="size-2 shrink-0 rounded-full bg-ink-3" />
             )}

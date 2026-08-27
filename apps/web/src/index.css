@@ -100,3 +100,15 @@ body,
   -webkit-touch-callout: none;
   touch-action: none;
 }
+
+/* The loading strip's sweep. Indeterminate: Chromium reports "loading" or
+   "not loading", never a percentage, and a bar that invents progress is worse
+   than one that only says "something is happening". */
+@keyframes orbit-loading {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}

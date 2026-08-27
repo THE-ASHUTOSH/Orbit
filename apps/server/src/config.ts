@@ -73,6 +73,22 @@ export const config = {
     maxHeight: int(process.env.MAX_VIEWPORT_HEIGHT, 1080),
   },
   /**
+   * The virtual screen a headed Chromium's windows live on, from XVFB_GEOMETRY.
+   *
+   * Load-bearing: a window cannot be larger than its screen, and a screencast of
+   * a viewport larger than its window is returned black. Zooming out grows the
+   * viewport, so without this the picture went black at 50% - measured. The
+   * entrypoint derives the geometry from MAX_VIEWPORT_*, and this parses whatever
+   * it ended up being so the clamp is honest rather than assumed.
+   */
+  display: (() => {
+    const [w, h] = (process.env.XVFB_GEOMETRY ?? '').split('x');
+    return {
+      width: int(w, int(process.env.MAX_VIEWPORT_WIDTH, 1920)),
+      height: int(h, int(process.env.MAX_VIEWPORT_HEIGHT, 1080)),
+    };
+  })(),
+  /**
    * Ignore the size each client asks for and always stream VIEWPORT_WIDTH x
    * VIEWPORT_HEIGHT. Useful when the biggest client window is smaller than the
    * resolution you want to browse at: the frame is then scaled down to fit,

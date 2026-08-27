@@ -12,7 +12,15 @@ if [ "${CHROMIUM_HEADLESS}" = "false" ]; then
   DISPLAY="${DISPLAY:-:99}"
   export DISPLAY
   echo "{\"level\":\"info\",\"msg\":\"starting Xvfb\",\"display\":\"${DISPLAY}\"}"
-  Xvfb "${DISPLAY}" -screen 0 "${XVFB_GEOMETRY:-1920x1080x24}" -nolisten tcp -dpi 96 &
+  # The virtual screen has to be at least as large as the largest viewport we
+  # will ever ask a window for. A window cannot be bigger than the screen it is
+  # on, and a screencast of a viewport bigger than its window comes back BLACK -
+  # which is exactly what zooming out used to produce. Derived from the same
+  # numbers rather than hardcoded, so the two cannot disagree.
+  SCREEN_W="${MAX_VIEWPORT_WIDTH:-1920}"
+  SCREEN_H="${MAX_VIEWPORT_HEIGHT:-1080}"
+  echo "{\"level\":\"info\",\"msg\":\"virtual screen\",\"geometry\":\"${XVFB_GEOMETRY:-${SCREEN_W}x${SCREEN_H}x24}\"}"
+  Xvfb "${DISPLAY}" -screen 0 "${XVFB_GEOMETRY:-${SCREEN_W}x${SCREEN_H}x24}" -nolisten tcp -dpi 96 &
   # Wait for the X socket rather than sleeping a fixed amount.
   i=0
   while [ "$i" -lt 100 ]; do

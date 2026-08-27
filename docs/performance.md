@@ -226,6 +226,34 @@ are the two dials that buy it back.
   real network transit. Point `BASE_URL` at the LAN address from another machine
   to include it.
 
+## Geometry: one rule, and never bigger than the screen
+
+A tab's viewport comes from a single function (`viewportFor` in `TabManager.ts`)
+used by both `tab.subscribe` and `tab.resize`. Before that they disagreed -
+subscribe honoured `PIN_VIEWPORT`, resize did not - so a tab's resolution flipped
+between the pinned size and the client's raw window depending on which message
+landed last, and changed again after every refresh.
+
+Three properties, all tested:
+
+- **Pinned means pinned.** With `PIN_VIEWPORT=1` the width is always
+  `VIEWPORT_WIDTH`; only the aspect follows the viewer's window.
+- **Snapped down to a 16px grid.** A window two pixels taller must not produce a
+  different viewport, a stream restart and a subtly different page. Down rather
+  than nearest, because rounding up overshoots the area available - and on a
+  headed browser overshooting the screen is what turns a frame black.
+- **Never larger than the screen.** A window cannot exceed the screen it is on,
+  and a screencast of a viewport larger than its window is captured as solid
+  black. Measured: at 50% zoom the viewport grew to 2560x1216 on a 1920x1080
+  virtual screen and every frame came back 100% black. The entrypoint now sizes
+  Xvfb from `MAX_VIEWPORT_*`, and the server clamps to whatever the screen
+  actually is, so the two cannot disagree.
+
+A stream restart (zoom, resize, recovery) also sends every viewer one keyframe
+immediately. Screencast frames are repaint-driven, so a page sitting still used
+to leave a blank canvas until something on it moved - the "it goes black until I
+reload the page inside" report.
+
 ## Honest limitations
 
 - Measured on loopback; LAN transit is additive and not included.

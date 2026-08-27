@@ -71,6 +71,79 @@ export function normalizeUrl(input: string): string | null {
 }
 
 /**
+ * The largest viewport this deployment can actually render.
+ *
+ * Headed Chromium draws into a real window on a real (virtual) screen, and a
+ * window cannot be bigger than its screen. Ask for more and the screencast comes
+ * back black - measured: at 50% zoom the viewport grew to 2560x1216 on a
+ * 1920x1080 screen and every frame was 100% black. Headless has no window, so
+ * only the configured maximum applies there.
+ */
+export function maxViewport(): { width: number; height: number } {
+  if (config.headless) return { width: config.viewport.maxWidth, height: config.viewport.maxHeight };
+  return {
+    width: Math.min(config.viewport.maxWidth, config.display.width),
+    height: Math.min(config.viewport.maxHeight, config.display.height),
+  };
+}
+
+/**
+ * Snap DOWN to a 16px grid: see viewportFor.
+ *
+ * Down, not nearest: rounding up overshoots the area the client actually has -
+ * and on a headed browser overshooting the screen is what turns a frame black.
+ */
+const snap = (n: number) => Math.max(16, Math.floor(n / 16) * 16);
+
+/**
+ * How big a tab's viewport should be, given what a client asked for.
+ *
+ * One function for both `tab.subscribe` and `tab.resize`, because they used to
+ * disagree: subscribe honoured PIN_VIEWPORT and resize did not, so the size
+ * flipped between the pinned resolution and the client's raw window depending on
+ * which message landed last - and again after every refresh. That is the
+ * "resolution is different every time" bug.
+ *
+ * Snapped to a 16px grid on purpose. Without it, two pixels of difference in a
+ * client's layout produced a different viewport, a different stream restart and a
+ * different-looking page for no reason a user could see.
+ */
+export function viewportFor(
+  requested: { width?: number | null; height?: number | null } | null,
+  // Injectable so the rule can be tested at both PIN_VIEWPORT settings without
+  // reloading the process.
+  opts: {
+    configured?: { width: number; height: number };
+    max?: { width: number; height: number };
+    pin?: boolean;
+  } = {},
+): { width: number; height: number } {
+  const configured = opts.configured ?? { width: config.viewport.width, height: config.viewport.height };
+  const max = opts.max ?? maxViewport();
+  const pin = opts.pin ?? config.pinViewport;
+  const aspect =
+    requested?.width && requested?.height ? requested.height / requested.width : configured.height / configured.width;
+
+  /**
+   * Only what the client's window implies is snapped. A configured resolution is
+   * an operator's decision and passes through exactly: 1920x1080 must mean
+   * 1920x1080, not the nearest multiple of sixteen.
+   */
+  const hasRequest = !!(requested?.width && requested?.height);
+  const wanted = pin
+    ? { width: configured.width, height: hasRequest ? snap(configured.width * aspect) : configured.height }
+    : {
+        width: requested?.width ? snap(requested.width) : configured.width,
+        height: requested?.height ? snap(requested.height) : configured.height,
+      };
+
+  return {
+    width: Math.max(240, Math.min(wanted.width, max.width)),
+    height: Math.max(180, Math.min(wanted.height, max.height)),
+  };
+}
+
+/**
  * Which URL a tab should open: what was asked for, else the configured home,
  * falling back to about:blank when neither is a usable http(s) address.
  */
@@ -676,8 +749,11 @@ export class TabManager extends EventEmitter {
     // blocks) or be rounded by the window manager, which then no longer matches
     // the viewport.
     const even = (n: number) => n - (n % 2);
-    const w = even(Math.max(240, Math.min(width, config.viewport.maxWidth)));
-    const h = even(Math.max(180, Math.min(height, config.viewport.maxHeight)));
+    // maxViewport(), not the configured maximum: on a headed browser the window
+    // cannot exceed the screen, and a viewport that does is captured as black.
+    const max = maxViewport();
+    const w = even(Math.max(240, Math.min(width, max.width)));
+    const h = even(Math.max(180, Math.min(height, max.height)));
     // Deliberately NOT recomputing zoom from the clamped size. Doing that fed a
     // derived value back into the input it was derived from: a resize would
     // re-read the clamped zoom, divide the new base by it, and the viewport would

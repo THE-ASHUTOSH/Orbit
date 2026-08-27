@@ -36,6 +36,7 @@ import {
   roleCan,
 } from '../auth/permissions.js';
 import { isOriginAllowed } from '../api/origin.js';
+import { viewportFor } from '../browser/TabManager.js';
 import type { Runtime } from '../runtime.js';
 import type { FrameSink } from '../browser/StreamManager.js';
 
@@ -347,24 +348,18 @@ export class Hub {
         const tab = this.rt.tabs.require(msg.tabId);
         conn.subscriptions.add(msg.tabId);
         touchUser(conn.userId, msg.tabId);
-        const firstSubscriber = this.rt.streams.subscriberCount(msg.tabId) === 0;
-        if (config.pinViewport) {
-          // Pinned resolution, but the viewer's aspect ratio: the width is fixed
-          // and the height follows the window, so nothing is letterboxed and no
-          // pixels are spent on black bars. Only the first subscriber sets the
-          // shape - later joiners must not reshape the tab under everyone else.
-          const aspect =
-            firstSubscriber && msg.width && msg.height
-              ? msg.height / msg.width
-              : config.viewport.height / config.viewport.width;
-          // Configured width, viewer's aspect. The window follows, so this can
-          // grow as well as shrink.
-          const width = config.viewport.width;
-          await this.rt.tabs.resize(msg.tabId, width, Math.round(width * aspect));
-        } else if (firstSubscriber && msg.width && msg.height) {
-          // Otherwise the first subscriber decides, and later joiners scale the
-          // frame locally rather than forcing a resize on everyone else.
-          await this.rt.tabs.resize(msg.tabId, msg.width, msg.height);
+        /**
+         * Only the first subscriber shapes the tab. Later joiners scale the frame
+         * locally instead: reshaping a tab under someone who is working in it
+         * would move the page around for no reason of their own.
+         *
+         * viewportFor is the single rule - PIN_VIEWPORT, the limits, the screen
+         * size and the 16px grid all live there, so subscribe and resize cannot
+         * come to different answers about the same window.
+         */
+        if (this.rt.streams.subscriberCount(msg.tabId) === 0) {
+          const size = viewportFor({ width: msg.width, height: msg.height });
+          await this.rt.tabs.resize(msg.tabId, size.width, size.height);
         }
         const { width, height } = await this.rt.streams.subscribe(msg.tabId, conn);
         conn.send({ type: 'stream.started', tabId: msg.tabId, width, height });
@@ -566,7 +561,13 @@ export class Hub {
 
       case 'tab.resize': {
         if (!canControlTab(conn.user, msg.tabId)) return conn.fail('forbidden', msg.tabId);
-        void this.rt.tabs.resize(msg.tabId, msg.width, msg.height).catch((err) => this.failAsync(conn, err, msg.type, msg.tabId));
+        // Through the same rule as subscribe. This used to pass the client's raw
+        // window size straight through, which silently overrode PIN_VIEWPORT and
+        // made the resolution depend on which message arrived last.
+        const size = viewportFor({ width: msg.width, height: msg.height });
+        void this.rt.tabs
+          .resize(msg.tabId, size.width, size.height)
+          .catch((err) => this.failAsync(conn, err, msg.type, msg.tabId));
         return;
       }
 

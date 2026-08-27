@@ -548,7 +548,8 @@ test.describe('orbit UI', () => {
       return (state.tabs as { url: string; width: number }[]).find((t) => t.url.includes('selftest'))?.width ?? 1;
     });
     const fit = canvas.width / frameWidth;
-    await page.mouse.click(canvas.x + 100 * fit, canvas.y + 85 * fit);
+    // The noopener link sits 50px up from the bottom of the page.
+    await page.mouse.click(canvas.x + 100 * fit, canvas.y + canvas.height - 35 * fit);
     await expect(tabs).toHaveCount(before + 2);
 
     // The view follows it, and it has an owner rather than being nobody's.
@@ -571,6 +572,104 @@ test.describe('orbit UI', () => {
     await mine.hover();
     await mine.getByRole('button', { name: 'Close tab' }).click();
     await expect(tabs).toHaveCount(before);
+  });
+
+  test('the viewport is the same size every time, and never black', async ({ page }) => {
+    /**
+     * Two bugs met here. The size was decided by whichever message landed last -
+     * subscribe honoured PIN_VIEWPORT, resize did not - so a tab's resolution
+     * changed on every refresh. And zooming out or going full screen asked for a
+     * viewport bigger than the screen the window lives on, which Chromium
+     * captures as solid black until the page inside is reloaded.
+     */
+    await signIn(page);
+    const tabs = page.locator('div[title*="tab_"]');
+    const before = await tabs.count();
+
+    await page.getByRole('button', { name: 'New tab' }).click();
+    await expect(tabs).toHaveCount(before + 1);
+    await tabs.last().click();
+    const tabId = (await tabs.last().getAttribute('title'))!.match(/tab_[0-9A-Z]+/)![0];
+
+    /** This tab's size and how much of the drawn frame is black. */
+    const geometry = (id: string) =>
+      page.evaluate(async (wanted) => {
+        const c = document.querySelector('canvas') as HTMLCanvasElement | null;
+        const { state } = await (await fetch('/api/state')).json();
+        let black = -1;
+        if (c && c.width) {
+          const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+          let dark = 0;
+          let n = 0;
+          for (let i = 0; i < d.length; i += 4 * 97) {
+            n++;
+            if (d[i]! < 8 && d[i + 1]! < 8 && d[i + 2]! < 8) dark++;
+          }
+          black = Math.round((dark / n) * 100);
+        }
+        const tab = (state.tabs as { tabId: string; width: number; height: number }[]).find((t) => t.tabId === wanted);
+        return { size: tab ? `${tab.width}x${tab.height}` : 'gone', black };
+      }, id);
+
+    /** The size it lands on, once the client has finished measuring itself. */
+    const settled = async () => {
+      let last = '';
+      for (let i = 0; i < 40; i++) {
+        const now = (await geometry(tabId)).size;
+        if (now === last) return now;
+        last = now;
+        await page.waitForTimeout(400);
+      }
+      return last;
+    };
+    const created = await settled();
+
+    // Refreshing this browser must not change the remote resolution.
+    for (const round of [1, 2]) {
+      await page.reload();
+      await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
+      await expect.poll(settled, { timeout: 25_000 }).toBe(created);
+      void round;
+    }
+
+    // Every zoom level, then full screen: the frame must never come back black.
+    for (const preset of ['50%', '200%', '100%']) {
+      await page.getByRole('button', { name: 'Menu' }).click();
+      await page.getByRole('button', { name: preset, exact: true }).click();
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => (await geometry(tabId)).black, { timeout: 20_000 }).toBeLessThan(50);
+    }
+
+    await page.getByRole('button', { name: 'Menu' }).click();
+    await page.getByRole('menuitem', { name: /Full screen/ }).click();
+    await expect.poll(async () => (await geometry(tabId)).black, { timeout: 20_000 }).toBeLessThan(50);
+    await page.getByRole('button', { name: /Leave full screen/ }).click();
+    await expect.poll(settled, { timeout: 25_000 }).toBe(created);
+
+    const last = tabs.last();
+    await last.hover();
+    await last.getByRole('button', { name: 'Close tab' }).click();
+    await expect(tabs).toHaveCount(before);
+  });
+
+  test('a loading tab says so, in the tab strip and over the page', async ({ page }) => {
+    await signIn(page);
+    const bar = await addressBar(page);
+    /**
+     * ?delay holds the first byte back for two seconds. A page from this same
+     * server otherwise arrives in single-digit milliseconds - far too fast to
+     * ever catch an indicator, which is precisely why one is worth having for
+     * pages that are not local.
+     */
+    await bar.fill(`${REMOTE_SELFTEST}?delay=2000`);
+    await bar.press('Enter');
+
+    await expect(page.getByRole('progressbar', { name: 'Page loading' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('status', { name: 'Loading' }).first()).toBeVisible();
+
+    // And they go away when it has arrived, rather than spinning forever.
+    await expect(page.getByRole('progressbar', { name: 'Page loading' })).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByRole('status', { name: 'Loading' })).toHaveCount(0);
   });
 
   test('rejects a bad password without revealing whether the user exists', async ({ page }) => {

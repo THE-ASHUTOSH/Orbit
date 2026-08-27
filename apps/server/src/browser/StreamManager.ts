@@ -235,6 +235,17 @@ export class StreamManager {
     // The last viewer may have left while that was in flight.
     if (this.streams.get(tabId) !== state || state.sinks.size === 0) return;
     await this.ensureStarted(tabId);
+
+    /**
+     * One frame, immediately, for everyone watching.
+     *
+     * Screencast frames are repaint-driven: a page that is sitting still emits
+     * nothing after a restart, so a resize or a zoom left viewers looking at a
+     * blank canvas until something on the page happened to move - which is why
+     * "it goes black until I reload the page inside" was a real report and not a
+     * rendering artefact.
+     */
+    await Promise.all([...state.sinks.values()].map((sink) => this.sendKeyframe(tabId, sink)));
   }
 
   private onFrame(e: CdpEvent): void {

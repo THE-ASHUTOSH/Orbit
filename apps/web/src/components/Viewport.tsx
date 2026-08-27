@@ -435,6 +435,20 @@ export function Viewport({
           }}
         />
 
+        {/* Loading, where the eye already is: a thin strip across the top of the
+            page itself. Indeterminate on purpose - Chromium does not tell us how
+            much of a page is left, and a bar that pretends to know is a lie. */}
+        {tab.loading && (
+          <div
+            role="progressbar"
+            aria-label="Page loading"
+            aria-busy="true"
+            className="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 overflow-hidden bg-sky-400/20"
+          >
+            <div className="h-full w-1/3 animate-[orbit-loading_1.1s_ease-in-out_infinite] bg-sky-400" />
+          </div>
+        )}
+
         {/* While the keyboard is captured, say so and offer the way out - the
             usual one (this browser's own chords) is exactly what is unavailable. */}
         {captured && (

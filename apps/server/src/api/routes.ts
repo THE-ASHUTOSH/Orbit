@@ -223,7 +223,23 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
    * and it exists so the stream can be exercised and measured on an isolated LAN
    * with no Internet access at all.
    */
-  app.get('/selftest', (_req, res) => {
+  app.get('/selftest', (req, res) => {
+    /**
+     * ?delay=<ms> holds the response back before sending a byte.
+     *
+     * A page served from this same process arrives in single-digit milliseconds,
+     * which is too fast to ever see a loading indicator - so there would be no
+     * way to check that one appears. Capped, and it only delays the first byte.
+     */
+    const delay = Math.min(5000, Math.max(0, Number(req.query.delay) || 0));
+    if (delay) {
+      setTimeout(() => sendSelftest(res), delay);
+      return;
+    }
+    sendSelftest(res);
+  });
+
+  const sendSelftest = (res: Response) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     // The app-wide CSP forbids inline scripts, which is right for the app and
@@ -242,8 +258,10 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
     <!-- rel=noopener makes the new tab have no opener, which is how a tab from
          an extension or a redirect arrives: nobody asked for it and nothing
          links it back. Used to test that such a tab still gets an owner. -->
+    <!-- Low on the page on purpose: the top-left corner is where tests click to
+         focus the page, and a link there gets opened by accident. -->
     <a id="orphan" href="/selftest?from=noopener" target="_blank" rel="noopener"
-       style="position:fixed;left:20px;top:70px;width:360px;height:30px;font:16px system-ui;color:#9cf;background:#222;display:block">
+       style="position:fixed;left:20px;bottom:20px;width:360px;height:30px;font:16px system-ui;color:#9cf;background:#222;display:block">
        open an orphan tab</a>
     <div id="t">--</div>
     <div id="n" style="font-size:.45em;opacity:.75">repaints: 0</div>
@@ -267,7 +285,7 @@ export function buildApp(rt: Runtime, hub: () => Hub): Express {
     }, 33);
   </script>
 </body></html>`);
-  });
+  };
 
   // --- admin ---------------------------------------------------------------
 

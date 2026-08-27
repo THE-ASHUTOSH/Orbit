@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { normalizeUrl, resolveTabUrl, TabManager } from '../browser/TabManager.js';
+import { normalizeUrl, resolveTabUrl, viewportFor, TabManager } from '../browser/TabManager.js';
 import { config } from '../config.js';
 import { openInMemoryForTests } from '../db.js';
 import { errorCode } from '../ws/hub.js';
@@ -119,4 +119,69 @@ test('errors: losing a race with a closing tab is reported as tab_not_found', ()
   assert.equal(errorCode(new Error('forbidden')), 'forbidden');
   // ...and a genuine surprise is still internal, so real bugs stay visible.
   assert.equal(errorCode(new Error('TypeError: x is not a function')), 'internal');
+});
+
+// --- viewport geometry ------------------------------------------------------
+
+const HD = { width: 1920, height: 1080 };
+const SCREEN = { width: 2560, height: 1440 };
+
+test('viewport: pinned keeps the resolution and takes only the shape from the client', () => {
+  /**
+   * The reported bug: subscribe honoured PIN_VIEWPORT and resize did not, so a
+   * tab's resolution flipped between the pinned size and the client's raw window
+   * depending on which message landed last - and changed again on every refresh.
+   * One rule, one answer.
+   */
+  const wide = viewportFor({ width: 1280, height: 608 }, { configured: HD, max: SCREEN, pin: true });
+  assert.equal(wide.width, 1920, 'the configured width is kept whatever the client asks for');
+  // 1920 * (608/1280) = 912, already on the grid.
+  assert.equal(wide.height, 912, 'only the aspect follows the viewer');
+
+  const tall = viewportFor({ width: 800, height: 1200 }, { configured: HD, max: SCREEN, pin: true });
+  assert.equal(tall.width, 1920);
+  assert.ok(tall.height <= SCREEN.height, 'and it never exceeds what the screen can show');
+});
+
+test('viewport: unpinned follows the client, and falls back to the configured size', () => {
+  assert.deepEqual(viewportFor({ width: 1280, height: 720 }, { configured: HD, max: SCREEN, pin: false }), {
+    width: 1280,
+    height: 720,
+  });
+  assert.deepEqual(viewportFor(null, { configured: HD, max: SCREEN, pin: false }), HD);
+});
+
+test('viewport: a few pixels of client difference produce the same viewport', () => {
+  /**
+   * Snapped to a 16px grid. Without this, a window a couple of pixels taller
+   * gave a different viewport, a different stream restart and a page that looked
+   * subtly different for no reason anyone could see.
+   */
+  const heightFor = (h: number) =>
+    viewportFor({ width: 1280, height: h }, { configured: HD, max: SCREEN, pin: true }).height;
+
+  // Jitter inside one step is invisible.
+  const cluster = [608, 610, 613].map(heightFor);
+  assert.equal(new Set(cluster).size, 1, `identical within a step: ${cluster.join(',')}`);
+
+  /**
+   * Across a wider range it moves in whole steps and only ever upwards - a 20px
+   * taller window is genuinely 30px more viewport at this scale, so the point is
+   * not that the number never changes but that it changes predictably: always a
+   * multiple of the step, never oscillating.
+   */
+  const spread = [560, 580, 600, 620, 640].map(heightFor);
+  assert.ok(spread.every((h) => h % 16 === 0), `every size is on the grid: ${spread.join(',')}`);
+  assert.deepEqual(spread, [...spread].sort((a, b) => a - b), `monotone in the window height: ${spread.join(',')}`);
+});
+
+test('viewport: never larger than the screen the window lives on', () => {
+  // Zooming out asks for more than the screen can show. Granting it produced a
+  // window smaller than its viewport, and a screencast of that is black.
+  const huge = viewportFor({ width: 4000, height: 3000 }, { configured: HD, max: SCREEN, pin: false });
+  assert.equal(huge.width, SCREEN.width);
+  assert.equal(huge.height, SCREEN.height);
+  // And never absurdly small either.
+  const tiny = viewportFor({ width: 10, height: 10 }, { configured: HD, max: SCREEN, pin: false });
+  assert.ok(tiny.width >= 240 && tiny.height >= 180, `${tiny.width}x${tiny.height}`);
 });
