@@ -347,18 +347,27 @@ test.describe('orbit UI', () => {
       .toContain(marker);
   });
 
-  test('keyboard capture is a per-tab toggle', async ({ page }) => {
+  test('keyboard capture is a per-tab toggle, in the same full screen', async ({ page }) => {
     /**
      * Capture exists so this browser stops eating ⌘T/⌘W and the remote browser
-     * gets them instead. Whether those specific chords arrive can only be
-     * checked by a human pressing them - a synthetic key event was never going
-     * to be intercepted by the host in the first place. What is checked here is
-     * the machinery: the lock is taken, it is scoped to one tab, and there is a
-     * way out that does not need the host's own shortcuts.
+     * gets them instead. Whether those specific chords arrive can only be checked
+     * by a human pressing them - a synthetic key event was never going to be
+     * intercepted by the host in the first place. What is checked here is the
+     * machinery: the lock is taken, it looks like full screen rather than a
+     * second kind of it, it is scoped to one tab, and there is a way out that
+     * does not need the host's own shortcuts.
      */
     await signIn(page);
     const captured = page.getByRole('button', { name: /Keyboard captured/ });
+    const tabs = page.locator('div[title*="tab_"]');
     const fullscreen = () => page.evaluate(() => !!document.fullscreenElement);
+
+    // Two tabs, so "per tab" can be shown - and switching needs a shortcut once
+    // the tab strip is out of the way.
+    const before = await tabs.count();
+    await page.getByRole('button', { name: 'New tab' }).click();
+    await expect(tabs).toHaveCount(before + 1);
+    await tabs.last().click();
 
     await page.getByRole('button', { name: 'Menu' }).click();
     await page.getByRole('menuitem', { name: /Capture keyboard/ }).click();
@@ -367,14 +376,13 @@ test.describe('orbit UI', () => {
     // 127.0.0.1 is a secure context, so the real lock is available here.
     await expect(captured).not.toContainText('partly');
     expect(await fullscreen()).toBe(true);
+    // Same full screen as full-screen mode - which keeps Orbit's controls.
+    await expect(tabs.first()).toBeVisible();
+    await expect(await addressBar(page)).toBeVisible();
 
     // Switching tabs hands the keyboard back: capture is per tab.
-    await page.getByRole('button', { name: 'New tab' }).click();
-    const tabs = page.locator('div[title*="tab_"]');
-    await tabs.last().click();
+    await tabs.first().click();
     await expect(captured).toHaveCount(0);
-    // Polled, not read once: the badge goes as soon as state changes, while
-    // handing the screen back is a promise that settles a tick later.
     await expect.poll(fullscreen, { timeout: 5_000 }).toBe(false);
 
     // Alt+K takes it and gives it back, without touching the host's chords.
@@ -383,10 +391,12 @@ test.describe('orbit UI', () => {
     await expect(captured).toBeVisible();
     await page.keyboard.press('Alt+k');
     await expect(captured).toHaveCount(0);
+    await expect.poll(fullscreen, { timeout: 5_000 }).toBe(false);
 
     const last = tabs.last();
     await last.hover();
     await last.getByRole('button', { name: 'Close tab' }).click();
+    await expect(tabs).toHaveCount(before);
   });
 
   test('a tab belongs to whoever opened it, and control can be asked for', async ({ browser }) => {
@@ -466,7 +476,7 @@ test.describe('orbit UI', () => {
     }
   });
 
-  test('full screen hides Orbit and gives the page the whole display', async ({ page }) => {
+  test('full screen gives the page the whole display, and keeps the controls', async ({ page }) => {
     await signIn(page);
     const tabs = page.locator('div[title*="tab_"]');
     const bar = await addressBar(page);
@@ -478,18 +488,23 @@ test.describe('orbit UI', () => {
     await page.getByRole('button', { name: 'Menu' }).click();
     await page.getByRole('menuitem', { name: /Full screen/ }).click();
 
-    // Orbit's own chrome steps aside, and the display is actually taken.
+    /**
+     * The display is taken - and on a real machine that is what buys the page
+     * more room, because the host browser's own tabs and toolbar go away. Not
+     * asserted here: this test browser has no host chrome to reclaim, so its
+     * viewport is the same size either way. What is checkable is the state.
+     */
     await expect(exit).toBeVisible();
-    await expect(tabs).toHaveCount(0);
-    await expect(bar).toHaveCount(0);
     expect(await fullscreen()).toBe(true);
-    // The page is still there and still streaming.
+
+    // The controls stay where they are. Hiding them would take away exactly what
+    // you went full screen to use.
+    await expect(tabs.first()).toBeVisible();
+    await expect(bar).toBeVisible();
     await expect(page.locator('canvas')).toBeVisible();
 
     // And back, by the on-screen way out.
     await exit.click();
-    await expect(tabs.first()).toBeVisible();
-    await expect(bar).toBeVisible();
     await expect.poll(fullscreen, { timeout: 5_000 }).toBe(false);
 
     // Alt+F does the same round trip without touching the mouse.

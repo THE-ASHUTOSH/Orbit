@@ -243,19 +243,22 @@ are actually using.
 | `Alt`/`⌥`+`F` | Full screen |
 | `Alt`/`⌥`+`K` | Capture the keyboard for this tab (see below) |
 
-**Full screen** — `Alt+F` (`⌥F` on a Mac), or **⋮ → Full screen**. Tab bar, toolbar and status bar
-step aside and the page takes the whole display, with one dimmed *Leave full
-screen* pill in the corner to come back (the same chord and `Esc` work too). Not just a
-CSS trick: the stage grows, so Orbit asks the server for a bigger stream and the
-picture gets sharper rather than scaled up.
+**Full screen** — `Alt+F` (`⌥F` on a Mac), or **⋮ → Full screen**. The page takes
+the whole display; the tab bar, toolbar and status bar **stay** — hiding them
+would take away the controls you went full screen to use. A dimmed *Leave full
+screen* pill sits in the corner (the same chord and `Esc` work too). Not just a
+CSS trick: what it reclaims is your own browser's tabs and toolbar, so the stage
+grows, Orbit asks the server for a bigger stream, and the picture gets sharper
+rather than scaled up.
 
 **Keyboard capture** — `Alt+K` (`⌥K` on a Mac), or **⋮ → Capture keyboard**, for the chords your
 own browser normally keeps: `⌘T`, `⌘W`, `⌘L`, `⌘1`…`⌘9`, `Escape`. While it is on,
 those go to the shared browser instead: `⌘T` opens a tab *in Orbit*, `⌘W` closes
 one there, and an extension bound to `⌘⇧H` finally gets its key.
 
-It is **per tab**, not per session — switching tabs hands the keyboard straight
-back, because capture also takes the screen. `Alt+K` or the on-screen badge
+Capture uses the **same full screen** as full-screen mode — one look, whichever
+way you got there, controls and all — and hands both back together: switching
+tabs, `Alt+K`, or leaving full screen ends it. It is **per tab**, not per session. `Alt+K` or the on-screen badge
 releases it, and so does leaving fullscreen.
 
 Two conditions come from the browser, not from Orbit:

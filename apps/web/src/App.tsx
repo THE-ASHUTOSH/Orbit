@@ -116,6 +116,16 @@ function Workspace({
    * server is asked for a bigger stream and the picture actually gets sharper.
    */
   const [immersive, setImmersive] = useState(false);
+  /**
+   * Whether capture is what took the screen.
+   *
+   * Capture needs fullscreen (the Keyboard Lock API only applies there), and it
+   * uses the same immersive layout as full-screen mode so there is one
+   * full-screen look rather than two. This says who to give the screen back to
+   * when the keyboard is released: nobody, or full-screen mode, which was
+   * already holding it.
+   */
+  const immersiveFromCapture = useRef(false);
   /** Requests from other people for tabs this user owns. */
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   /** Tabs where this user has already asked the owner, so we stop asking. */
@@ -143,7 +153,10 @@ function Workspace({
   /** Record the tab being left, so closing the next one can come back to it. */
   const remember = (leaving: string | null) => {
     if (!leaving) return;
-    tabHistory.current = [...tabHistory.current.filter((id) => id !== leaving), leaving].slice(-20);
+    tabHistory.current = [
+      ...tabHistory.current.filter((id) => id !== leaving),
+      leaving,
+    ].slice(-20);
   };
 
   /** The most recently visited tab that is still open. */
@@ -245,7 +258,9 @@ function Workspace({
           setState((s) =>
             s ? { ...s, tabs: s.tabs.filter((t) => t.tabId !== msg.tabId) } : s,
           );
-          tabHistory.current = tabHistory.current.filter((id) => id !== msg.tabId);
+          tabHistory.current = tabHistory.current.filter(
+            (id) => id !== msg.tabId,
+          );
           // Back where we came from, if it is still open. Returning null hands
           // it to the auto-attach effect, which takes the first tab - the right
           // last resort, the wrong normal case.
@@ -535,15 +550,36 @@ function Workspace({
    * that is the only moment fullscreen may be requested, and the Keyboard Lock
    * API only applies while fullscreen.
    */
+  /**
+   * Hand the keyboard back, and the screen with it if capture is what took it.
+   *
+   * One routine for every way capture can end - the toggle, a tab switch - so
+   * they cannot disagree. They did: switching tabs released the lock but left the
+   * screen taken and Orbit's chrome hidden, with nothing on screen to explain it.
+   */
+  const releaseCapture = useCallback(() => {
+    const keepScreen = immersive && !immersiveFromCapture.current;
+    void releaseKeyboard(keepScreen);
+    setCapture(null);
+    if (immersiveFromCapture.current) {
+      immersiveFromCapture.current = false;
+      setImmersive(false);
+    }
+  }, [immersive]);
+
   const toggleCapture = () => {
     if (!activeTabId) return;
     if (capture) {
-      void releaseKeyboard(immersive);
-      setCapture(null);
+      releaseCapture();
       return;
     }
     void captureKeyboard(document.documentElement).then((mode) => {
       setCapture({ tabId: activeTabId, mode });
+      // Same full screen as full-screen mode: one look, whichever way you got here.
+      if (!immersive) {
+        immersiveFromCapture.current = true;
+        setImmersive(true);
+      }
       if (mode === "partial") {
         setToast(
           fullCaptureAvailable()
@@ -557,8 +593,16 @@ function Workspace({
   const toggleFullscreen = () => {
     if (immersive) {
       setImmersive(false);
-      // Keyboard capture also needs the screen; leave it alone if it is on.
-      if (!capture) void exitFullscreen();
+      immersiveFromCapture.current = false;
+      // Capture cannot outlive fullscreen - the lock only applies there - so
+      // leaving full screen hands the keyboard back too rather than leaving a
+      // captured keyboard with no way to see that it is captured.
+      if (capture) {
+        void releaseKeyboard(false);
+        setCapture(null);
+      } else {
+        void exitFullscreen();
+      }
       return;
     }
     void enterFullscreen(document.documentElement).then(() =>
@@ -568,11 +612,8 @@ function Workspace({
 
   /** Capture belongs to one tab: switching tabs ends it. */
   useEffect(() => {
-    if (capture && capture.tabId !== activeTabId) {
-      void releaseKeyboard(immersive);
-      setCapture(null);
-    }
-  }, [capture, activeTabId, immersive]);
+    if (capture && capture.tabId !== activeTabId) releaseCapture();
+  }, [capture, activeTabId, releaseCapture]);
 
   /** Leaving fullscreen by any route (Esc, F11, the OS) ends both of them. */
   useEffect(() => {
@@ -580,6 +621,7 @@ function Workspace({
     const onFullscreen = () => {
       if (document.fullscreenElement) return;
       setImmersive(false);
+      immersiveFromCapture.current = false;
       if (capture) {
         void releaseKeyboard(false);
         setCapture(null);
@@ -675,113 +717,113 @@ function Workspace({
 
   return (
     <div className="relative flex h-full flex-col">
-      {/* In full screen the page gets everything; Orbit's chrome steps aside. */}
-      {!immersive && (
-        <>
-          <TabBar
-            tabs={state?.tabs ?? []}
-            activeTabId={activeTabId}
-            users={state?.users ?? []}
-            canCreate={canCreate}
-            onSelect={selectTab}
-            onClose={(tabId) => socket.send({ type: "tab.close", tabId })}
-            onCreate={() => socket.send({ type: "tab.create" })}
-            onRename={(tabId, label) =>
-              socket.send({ type: "tab.rename", tabId, label })
-            }
-          />
+      {/* Orbit's chrome stays in full screen. What full screen buys is the whole
+          display for the page instead of the whole browser window - so the stage
+          grows, the server is asked for a bigger stream, and the picture gets
+          sharper. Hiding the tab bar and the toolbar as well would take away the
+          controls you went full screen to use. */}
+      <TabBar
+        tabs={state?.tabs ?? []}
+        activeTabId={activeTabId}
+        users={state?.users ?? []}
+        canCreate={canCreate}
+        onSelect={selectTab}
+        onClose={(tabId) => socket.send({ type: "tab.close", tabId })}
+        onCreate={() => socket.send({ type: "tab.create" })}
+        onRename={(tabId, label) =>
+          socket.send({ type: "tab.rename", tabId, label })
+        }
+      />
 
-          <Toolbar
-            ref={addressRef}
-            tab={activeTab}
+      <Toolbar
+        ref={addressRef}
+        tab={activeTab}
+        canControl={canControl}
+        bookmarked={bookmarked}
+        onToggleBookmark={toggleBookmark}
+        ownerName={
+          // Only worth offering when asking could actually change something.
+          !canControl && ownerOf(activeTab) && self.role !== "viewer"
+            ? nameOfUser(activeTab!.ownerId!)
+            : null
+        }
+        requestPending={!!activeTabId && asked.has(activeTabId)}
+        onRequestControl={requestControl}
+        onNavigate={navigate}
+        onAction={(action) =>
+          activeTabId &&
+          socket.send({ type: "tab.action", tabId: activeTabId, action })
+        }
+        onResetZoom={() =>
+          activeTabId &&
+          socket.send({ type: "tab.zoom", tabId: activeTabId, zoom: 1 })
+        }
+        menu={
+          <Menu
+            zoom={activeTab?.zoom ?? 1}
+            viewWidth={activeTab?.width ?? 0}
+            viewHeight={activeTab?.height ?? 0}
             canControl={canControl}
-            bookmarked={bookmarked}
-            onToggleBookmark={toggleBookmark}
-            ownerName={
-              // Only worth offering when asking could actually change something.
-              !canControl && ownerOf(activeTab) && self.role !== "viewer"
-                ? nameOfUser(activeTab!.ownerId!)
-                : null
-            }
-            requestPending={!!activeTabId && asked.has(activeTabId)}
-            onRequestControl={requestControl}
-            onNavigate={navigate}
-            onAction={(action) =>
+            onZoom={(zoom) =>
               activeTabId &&
-              socket.send({ type: "tab.action", tabId: activeTabId, action })
+              socket.send({ type: "tab.zoom", tabId: activeTabId, zoom })
             }
-            onResetZoom={() =>
-              activeTabId &&
-              socket.send({ type: "tab.zoom", tabId: activeTabId, zoom: 1 })
+            downloadCount={downloads.length}
+            onOpenDownloads={() => {
+              setShowDownloads(true);
+              refreshDownloads();
+            }}
+            canInspect={
+              self.role === "admin" && (state?.features.devtools ?? false)
             }
-            menu={
-              <Menu
-                zoom={activeTab?.zoom ?? 1}
-                viewWidth={activeTab?.width ?? 0}
-                viewHeight={activeTab?.height ?? 0}
-                canControl={canControl}
-                onZoom={(zoom) =>
-                  activeTabId &&
-                  socket.send({ type: "tab.zoom", tabId: activeTabId, zoom })
-                }
-                downloadCount={downloads.length}
-                onOpenDownloads={() => {
-                  setShowDownloads(true);
-                  refreshDownloads();
-                }}
-                canInspect={
-                  self.role === "admin" && (state?.features.devtools ?? false)
-                }
-                onInspect={() => {
-                  if (!activeTabId) return;
-                  // The server decides the URL: the client never learns the CDP port
-                  // or the target id until it is allowed to.
-                  void api
-                    .devtoolsUrl(activeTabId)
-                    .then((r) => window.open(r.url, "_blank", "noopener"))
-                    .catch(() =>
-                      setToast("DevTools is not enabled on this server."),
-                    );
-                }}
-                isAdmin={self.role === "admin"}
-                onOpenAdmin={() => setShowAdmin(true)}
-                theme={theme}
-                onCycleTheme={cycleTheme}
-                showMetrics={showMetrics}
-                onToggleMetrics={() => setShowMetrics((v) => !v)}
-                fullscreen={immersive}
+            onInspect={() => {
+              if (!activeTabId) return;
+              // The server decides the URL: the client never learns the CDP port
+              // or the target id until it is allowed to.
+              void api
+                .devtoolsUrl(activeTabId)
+                .then((r) => window.open(r.url, "_blank", "noopener"))
+                .catch(() =>
+                  setToast("DevTools is not enabled on this server."),
+                );
+            }}
+            isAdmin={self.role === "admin"}
+            onOpenAdmin={() => setShowAdmin(true)}
+            theme={theme}
+            onCycleTheme={cycleTheme}
+            showMetrics={showMetrics}
+            onToggleMetrics={() => setShowMetrics((v) => !v)}
+            fullscreen={immersive}
             onToggleFullscreen={toggleFullscreen}
             captured={!!capture}
-                captureMode={capture?.mode ?? null}
-                onToggleCapture={toggleCapture}
-                bookmarkCount={bookmarks.length}
-                onOpenBookmarks={() => {
-                  setShowBookmarks(true);
-                  refreshBookmarks();
-                }}
-                onOpenHistory={() => {
-                  setShowHistory(true);
-                  void api
-                    .history()
-                    .then((r) => setHistory(r.history))
-                    .catch(() => {});
-                }}
-                onOpenExtensions={() => setShowExtensions(true)}
-                onNewTab={() => socket.send({ type: "tab.create" })}
-                onDuplicateTab={() =>
-                  activeTabId &&
-                  socket.send({
-                    type: "tab.action",
-                    tabId: activeTabId,
-                    action: "duplicate",
-                  })
-                }
-                onLogout={() => void api.logout().then(onSignedOut)}
-              />
+            captureMode={capture?.mode ?? null}
+            onToggleCapture={toggleCapture}
+            bookmarkCount={bookmarks.length}
+            onOpenBookmarks={() => {
+              setShowBookmarks(true);
+              refreshBookmarks();
+            }}
+            onOpenHistory={() => {
+              setShowHistory(true);
+              void api
+                .history()
+                .then((r) => setHistory(r.history))
+                .catch(() => {});
+            }}
+            onOpenExtensions={() => setShowExtensions(true)}
+            onNewTab={() => socket.send({ type: "tab.create" })}
+            onDuplicateTab={() =>
+              activeTabId &&
+              socket.send({
+                type: "tab.action",
+                tabId: activeTabId,
+                action: "duplicate",
+              })
             }
+            onLogout={() => void api.logout().then(onSignedOut)}
           />
-        </>
-      )}
+        }
+      />
 
       <main ref={stageRef} className="relative min-h-0 flex-1">
         {activeTab ? (
@@ -909,13 +951,13 @@ function Workspace({
         )}
 
         {/* The way out. Dimmed until pointed at, because it sits over the page. */}
-        {immersive && (
+        {immersive && !immersiveFromCapture.current && (
           <button
             onClick={toggleFullscreen}
-            title={`Leave full screen (${altChord('F')})`}
+            title={`Leave full screen (${altChord("F")})`}
             className="absolute right-3 top-3 z-30 rounded-full border border-line-2 bg-panel/70 px-3 py-1 text-[11px] text-ink-2 opacity-40 shadow-lg backdrop-blur transition-opacity hover:opacity-100"
           >
-            ⤡ Leave full screen · {altChord('F')}
+            ⤡ Leave full screen · {altChord("F")}
           </button>
         )}
 
@@ -992,18 +1034,16 @@ function Workspace({
         )}
       </main>
 
-      {!immersive && (
-        <StatusBar
-          users={state?.users ?? []}
-          tabs={state?.tabs ?? []}
-          browserStatus={state?.status ?? "starting"}
-          selfUserId={self.userId}
-          status={status}
-          latency={latency}
-          metrics={metrics}
-          showMetrics={showMetrics}
-        />
-      )}
+      <StatusBar
+        users={state?.users ?? []}
+        tabs={state?.tabs ?? []}
+        browserStatus={state?.status ?? "starting"}
+        selfUserId={self.userId}
+        status={status}
+        latency={latency}
+        metrics={metrics}
+        showMetrics={showMetrics}
+      />
     </div>
   );
 }

@@ -342,6 +342,17 @@ that actually work through a stream.
   tab there - which Orbit adopts, redirected from `chrome://newtab` to the same
   home page the "+" button uses.
 
+- **One full screen, not two - and it keeps the controls.** Capture needs
+  fullscreen (that is where the Keyboard Lock API applies) and full-screen mode
+  wants it, so both produce the same thing: the whole display for the page, with
+  the tab bar, toolbar and status bar still there. What full screen reclaims is
+  the *host* browser's tabs and toolbar; hiding Orbit's own as well would remove
+  the controls the mode exists to make room for. Which of the two took the screen is remembered, so
+  releasing the keyboard only gives the screen back when capture is what claimed
+  it - and every way out (the toggle, a tab switch, leaving fullscreen) goes
+  through one routine, because when they were separate a tab switch released the
+  lock and left the screen taken with nothing on screen to explain it.
+
 - **Full screen shares one primitive with capture.** Both want the display, and
   fullscreen is a property of the document, not of a component - so there is a
   single `enterFullscreen`/`exitFullscreen` pair, and releasing the keyboard
