@@ -97,6 +97,15 @@ export const config = {
    */
   pinViewport: bool(process.env.PIN_VIEWPORT, false),
   /**
+   * Keep session cookies (the ones with no expiry) across a browser restart.
+   *
+   * Off by default: a site that sets one is asking for it to be forgotten when
+   * the browser closes, and overriding that is an operator's decision. On, it is
+   * what stops `./orbit restart` from signing everyone out of sites where they
+   * did not tick "keep me signed in". See browser/sessionCookies.ts.
+   */
+  persistSessionCookies: bool(process.env.PERSIST_SESSION_COOKIES, false),
+  /**
    * devicePixelRatio the page sees. Note this does NOT raise the stream's
    * resolution: CDP screencast captures at the CSS viewport size in DIP, so the
    * frame stays the same pixel count whatever this is set to (measured). It only

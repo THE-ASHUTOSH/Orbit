@@ -17,6 +17,7 @@ import { TabManager, type Tab } from './browser/TabManager.js';
 import { InputManager } from './browser/InputManager.js';
 import { StreamManager } from './browser/StreamManager.js';
 import { CookieManager } from './browser/CookieManager.js';
+import { restoreSessionCookies } from './browser/sessionCookies.js';
 import { HealthMonitor } from './browser/HealthMonitor.js';
 import type { CdpEvent } from './browser/cdp.js';
 import type { Hub } from './ws/hub.js';
@@ -103,6 +104,10 @@ export class Runtime extends EventEmitter {
           cdp.on('Browser.downloadProgress', (e: CdpEvent) => this.onDownloadProgress(e));
           cdp.on('Page.fileChooserOpened', (e: CdpEvent) => this.onFileChooser(e));
           cdp.on('Runtime.bindingCalled', (e: CdpEvent) => this.onBinding(e));
+          // Cookies before tabs: a restored page starts loading during
+          // tabs.attach, and a cookie that arrives after that is a cookie the
+          // page did not have when it asked who you are.
+          await restoreSessionCookies(cdp);
           // Tabs first: re-arming streams before the page sessions exist would
           // start screencasts against the dead sessions of the old browser.
           await this.tabs.attach(cdp);

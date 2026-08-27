@@ -107,6 +107,12 @@ CREATE TABLE IF NOT EXISTS tab_users (
   PRIMARY KEY (tab_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS session_cookies (
+  id    INTEGER PRIMARY KEY CHECK (id = 1),
+  blob  TEXT NOT NULL,
+  at    INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS bookmarks (
   id         TEXT PRIMARY KEY,
   url        TEXT NOT NULL UNIQUE,
@@ -385,6 +391,21 @@ export const listTabGrants = (tabId: string) =>
     user_id: string;
     permission: TabPermission;
   }[];
+
+/**
+ * The encrypted session-cookie stash: one row, replaced each shutdown.
+ *
+ * A single blob rather than a table of cookies - it is written and read whole,
+ * and never queried, so rows would buy nothing and would put cookie names and
+ * domains in the clear.
+ */
+export function saveSessionCookies(blob: string | null): void {
+  db.prepare('DELETE FROM session_cookies').run();
+  if (blob) db.prepare('INSERT INTO session_cookies (id, blob, at) VALUES (1, ?, ?)').run(blob, Date.now());
+}
+
+export const loadSessionCookies = (): string | null =>
+  (db.prepare('SELECT blob FROM session_cookies WHERE id = 1').get() as { blob: string } | undefined)?.blob ?? null;
 
 // --- bookmarks -------------------------------------------------------------
 

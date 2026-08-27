@@ -17,6 +17,7 @@ import { recordBrowserStart, recordBrowserStatus } from '../db.js';
 import { CdpConnection, discoverEndpoint, readActivePortEndpoint } from './cdp.js';
 import { clearStaleProfileLocks } from './profile.js';
 import { ensureExtensionsDir, extensionArgs } from './extensions.js';
+import { stashSessionCookies } from './sessionCookies.js';
 import type { BrowserStatus } from '@orbit/protocol';
 
 export interface BrowserManagerEvents {
@@ -340,6 +341,9 @@ export class BrowserManager extends EventEmitter {
     // Ask Chromium to close itself first so it flushes the profile (cookies,
     // localStorage) cleanly; SIGKILL can leave a corrupt profile behind.
     try {
+      // Session cookies live only in memory, so they have to be taken now -
+      // after Browser.close they are gone by definition. See sessionCookies.ts.
+      if (this.cdpConn?.connected) await stashSessionCookies(this.cdpConn);
       if (this.cdpConn?.connected) await this.cdpConn.send('Browser.close', {}, undefined, 5000);
     } catch {
       /* fall through to signals */

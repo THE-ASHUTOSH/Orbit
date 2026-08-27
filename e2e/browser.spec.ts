@@ -558,10 +558,14 @@ test.describe('orbit UI', () => {
 
     // Click the noopener link at (20,70) on the page, mapped to the drawn frame.
     const canvas = (await page.locator('canvas').boundingBox())!;
-    const frameWidth = await page.evaluate(async () => {
+    // This tab's width, not "some tab showing the self-test page": with leftover
+    // tabs from earlier tests the wrong one was picked, the scale came out wrong
+    // and the click missed the link entirely.
+    const myTabId = (await tabs.last().getAttribute('title'))!.match(/tab_[0-9A-Z]+/)![0];
+    const frameWidth = await page.evaluate(async (id) => {
       const { state } = await (await fetch('/api/state')).json();
-      return (state.tabs as { url: string; width: number }[]).find((t) => t.url.includes('selftest'))?.width ?? 1;
-    });
+      return (state.tabs as { tabId: string; width: number }[]).find((t) => t.tabId === id)?.width ?? 1;
+    }, myTabId);
     const fit = canvas.width / frameWidth;
     // The noopener link sits 50px up from the bottom of the page.
     await page.mouse.click(canvas.x + 100 * fit, canvas.y + canvas.height - 35 * fit);

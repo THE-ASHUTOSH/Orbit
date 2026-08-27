@@ -123,6 +123,26 @@ between them.
 Role admins keep `admin` on every tab: somebody has to be able to close a tab
 whose owner has gone home.
 
+### Session cookies at rest (`PERSIST_SESSION_COOKIES`, off by default)
+
+With it on, cookies that have no expiry are read over CDP just before the browser
+is closed, encrypted with AES-256-GCM under a key derived from `SESSION_SECRET`
+(scrypt), and written as one blob in the application database - then set back on
+the next start. Only the count is ever logged, never a name, domain or value.
+
+Two things to be clear about before turning it on:
+
+- It **overrides what the site asked for.** A session cookie means "forget this
+  when the browser closes"; this remembers it. That is the point - Orbit's browser
+  is a shared machine people leave logged in, and a container restart is an
+  operator action, not a user closing their browser - but it is a policy choice,
+  which is why it is not the default.
+- It puts credentials **at rest in a second place**. They are already on that
+  volume inside Chromium's own encrypted store; this adds an encrypted copy next
+  to it, under a key that lives in the same `.env`. Anyone who can read the volume
+  and the environment can read either. Changing `SESSION_SECRET` makes the stash
+  undecryptable, and it is then discarded rather than retried.
+
 ## Input validation
 
 Every inbound message is parsed with the shared zod schema before anything else

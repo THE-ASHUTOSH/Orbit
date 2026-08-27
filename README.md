@@ -104,7 +104,7 @@ panel is also where anyone opens an extension's popup or options page.
 
 | Command | What it does |
 |---|---|
-| `./orbit test` | full suite: 116 tests, including real-Chromium integration |
+| `./orbit test` | full suite: 118 tests, including real-Chromium integration |
 | `./orbit bench [users] [tabs] [secs]` | latency and throughput benchmark |
 | `./orbit stress [users] [tabs]` | stress, races and abuse, with pass/fail invariants |
 | `./orbit dev` | run from source without Docker (API `:3030`, Vite `:5173`) |
@@ -193,7 +193,12 @@ proper virtual key codes, not just characters.
 
 **Shared, persistent state.** One Chromium profile on a Docker volume: cookies,
 logins, localStorage, IndexedDB and history survive restarts, and a login in one
-tab is a login in every tab.
+tab is a login in every tab. The exception is a **session cookie** - one a site
+sets with no expiry, meaning "forget this when the browser closes" - which is why
+a restart used to sign you out of anywhere you had not ticked "keep me signed
+in". `PERSIST_SESSION_COOKIES=true` carries those across a restart too, encrypted
+at rest with a key derived from `SESSION_SECRET`. Off by default, because it
+deliberately overrides what the site asked for.
 
 **Presence.** Every person gets a distinct colour — assigned by position, not by
 hashing, so no two people ever share a dot. The bar shows who is online and
@@ -440,7 +445,7 @@ About 9,000 lines of TypeScript and 1,800 lines of documentation.
 
 ## Tests
 
-`./orbit test` runs **116 tests**, including an integration suite against a real
+`./orbit test` runs **118 tests**, including an integration suite against a real
 Chromium:
 
 - **unit** — scrypt hashing and timing, session cookie signing and tampering, the

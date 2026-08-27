@@ -42,6 +42,7 @@ Object.assign(process.env, {
   MAX_TABS: '10',
   VIEWPORT_WIDTH: '900',
   VIEWPORT_HEIGHT: '600',
+  PERSIST_SESSION_COOKIES: 'true',
 });
 
 const { startServer } = await import('../index.js');
@@ -745,6 +746,42 @@ test('orbit: end to end', async (t) => {
     const text = await waitFor('input works after recovery', () => typed.get('one-b'), 20_000);
     assert.equal(text, 'recovered');
     resumed.close();
+  });
+
+  await t.test('a session cookie survives a browser restart', async () => {
+    /**
+     * A cookie with no expiry is the site saying "forget this when the browser
+     * closes" - which is why restarting signed people out of anything where they
+     * had not ticked "keep me signed in". With PERSIST_SESSION_COOKIES the server
+     * takes them on the way down and puts them back on the way up.
+     */
+    const cdp = server.rt.browser.cdp;
+    await cdp.send('Storage.setCookies', {
+      cookies: [
+        {
+          name: 'orbit_session_probe',
+          value: 'still-signed-in',
+          domain: '127.0.0.1',
+          path: '/',
+          secure: false,
+          httpOnly: false,
+          session: true,
+        },
+      ],
+    });
+
+    const probeCount = async () => {
+      const { cookies } = await server.rt.browser.cdp.send<{ cookies: { name: string; value: string }[] }>(
+        'Storage.getCookies',
+        {},
+      );
+      return cookies.filter((c) => c.name === 'orbit_session_probe' && c.value === 'still-signed-in').length;
+    };
+    assert.equal(await probeCount(), 1, 'the probe cookie is there to begin with');
+
+    await server.rt.browser.restart();
+    await waitFor('browser back up', () => server.rt.browser.status === 'running', 60_000);
+    assert.equal(await probeCount(), 1, 'and it is still there after the restart');
   });
 
   await t.test('health and metrics report real numbers', async () => {
