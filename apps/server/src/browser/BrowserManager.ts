@@ -170,6 +170,16 @@ export class BrowserManager extends EventEmitter {
       log.warn('/dev/shm is small - redirecting Chromium shared memory to /tmp', { hint: 'raise shm_size' });
       args.push('--disable-dev-shm-usage');
     }
+    // Renders AND captures at N device pixels per CSS pixel.
+    //
+    // This has to be a launch flag. Emulation.setDeviceMetricsOverride takes a
+    // deviceScaleFactor too, and setting it looks like it works - the page
+    // reports the new devicePixelRatio - while frames keep arriving at the
+    // window's own scale, slightly softer than before, because the page renders
+    // at 2x and is squeezed back into a 1x surface. Measured: with the CDP
+    // override alone, frames stayed 1920x912 at an identical 56 KB. The scale of
+    // the captured surface is a launch-time property of the window.
+    if (config.deviceScaleFactor !== 1) args.push(`--force-device-scale-factor=${config.deviceScaleFactor}`);
     if (config.headless) args.unshift('--headless=new');
     if (!config.chromiumSandbox) args.unshift('--no-sandbox', '--disable-setuid-sandbox');
     return args;

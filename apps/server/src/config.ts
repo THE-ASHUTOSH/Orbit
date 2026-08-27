@@ -24,6 +24,23 @@ function findChromium(): string {
 
 const dataRoot = process.env.DATA_DIR || (existsSync('/data') ? '/data' : path.resolve('data'));
 
+/**
+ * A legal device scale factor, or 1.
+ *
+ * Clamped to 1..3: below 1 would mean sending fewer pixels than the page has,
+ * and above 3 the virtual screen (MAX_VIEWPORT x this) grows past what the
+ * container can hold. Anything unparseable is 1 rather than an error, because a
+ * typo in this knob should not stop the browser from starting.
+ *
+ * docker-entrypoint.sh clamps identically when it sizes the X screen; the two
+ * disagreeing means a window larger than its screen, which captures as black.
+ */
+export function scaleFactor(raw: string | undefined): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 1) return 1;
+  return Math.min(3, n);
+}
+
 export const config = {
   env: process.env.NODE_ENV ?? 'development',
   isProd: process.env.NODE_ENV === 'production',
@@ -106,13 +123,20 @@ export const config = {
    */
   persistSessionCookies: bool(process.env.PERSIST_SESSION_COOKIES, false),
   /**
-   * devicePixelRatio the page sees. Note this does NOT raise the stream's
-   * resolution: CDP screencast captures at the CSS viewport size in DIP, so the
-   * frame stays the same pixel count whatever this is set to (measured). It only
-   * changes which assets responsive sites choose to serve. Use PAGE_ZOOM plus a
-   * larger VIEWPORT to get genuinely more pixels.
+   * Device pixels per CSS pixel: how finely the page is drawn, not how big it
+   * looks. The layout is identical at every value - only the sample count
+   * changes, so 2 sends a 3840-wide frame of the same 1920-wide page.
+   *
+   * Fractional values are supported and are often the right answer: the useful
+   * setting is (client CSS box x that client's devicePixelRatio) / viewport
+   * width, which for a windowed retina client lands nearer 1.3 than 2.
+   *
+   * Browser-wide and launch-time, because Chromium takes it as a window
+   * property (--force-device-scale-factor), not per tab: changing it restarts
+   * the browser. Default 1 - above 1 only pays off for retina clients, and
+   * costs bandwidth for everyone. See docs/performance.md#sharpness.
    */
-  deviceScaleFactor: Math.min(3, Math.max(1, Number(process.env.DEVICE_SCALE_FACTOR ?? 1) || 1)),
+  deviceScaleFactor: scaleFactor(process.env.DEVICE_SCALE_FACTOR),
 
   maxFps: int(process.env.MAX_FPS, 30),
   streamQuality: Math.min(100, Math.max(1, int(process.env.STREAM_QUALITY, 70))),

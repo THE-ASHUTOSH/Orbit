@@ -108,6 +108,8 @@ MAX_FPS=45
 MAX_VIEWPORT_WIDTH=2560
 MAX_VIEWPORT_HEIGHT=1440
 PIN_VIEWPORT=true
+# Sharpness: 1..3, fractions fine. 1 for plain monitors, ~1.3-1.8 for retina
+# clients at ~1.4-2.6x the bandwidth. See .env.example.
 DEVICE_SCALE_FACTOR=1
 
 # Container ceilings. 20 tabs and 40 viewers peaked at 4.2GB of this.

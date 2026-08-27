@@ -17,8 +17,22 @@ if [ "${CHROMIUM_HEADLESS}" = "false" ]; then
   # on, and a screencast of a viewport bigger than its window comes back BLACK -
   # which is exactly what zooming out used to produce. Derived from the same
   # numbers rather than hardcoded, so the two cannot disagree.
-  SCREEN_W="${MAX_VIEWPORT_WIDTH:-1920}"
-  SCREEN_H="${MAX_VIEWPORT_HEIGHT:-1080}"
+  # Times the device scale factor: viewports are CSS pixels but a screen is real
+  # ones, so at DEVICE_SCALE_FACTOR=2 a 1920-wide window covers 3840 of them and
+  # a screen sized for 1920 would clip it - back to black frames.
+  DSF="${DEVICE_SCALE_FACTOR:-1}"
+  # awk rather than $(( )): the scale factor is allowed to be fractional, and
+  # shell arithmetic is integer-only - "1.5" makes it fail and leaves the
+  # geometry empty, which surfaces as "Xvfb failed to start" with no hint why.
+  # Anything unparseable falls back to 1x instead of a zero-sized screen.
+  # Clamped to 1..3 exactly as config.ts does (see scaleFactor there): if the
+  # server scaled by more than this screen allows, the window would be larger
+  # than the screen it is on and every frame would come back black. The `+ 0`
+  # coercions matter - awk compares a non-numeric -v as a string, and "abc" > "3"
+  # is true, which would silently pick 3x for a typo.
+  scaled() { awk -v v="$1" -v d="$DSF" 'BEGIN { v = v + 0; d = d + 0; if (!(d > 1)) d = 1; if (d > 3) d = 3; printf "%d", (v * d) + 0.999 }'; }
+  SCREEN_W=$(scaled "${MAX_VIEWPORT_WIDTH:-1920}")
+  SCREEN_H=$(scaled "${MAX_VIEWPORT_HEIGHT:-1080}")
   echo "{\"level\":\"info\",\"msg\":\"virtual screen\",\"geometry\":\"${XVFB_GEOMETRY:-${SCREEN_W}x${SCREEN_H}x24}\"}"
   Xvfb "${DISPLAY}" -screen 0 "${XVFB_GEOMETRY:-${SCREEN_W}x${SCREEN_H}x24}" -nolisten tcp -dpi 96 &
   # Wait for the X socket rather than sleeping a fixed amount.

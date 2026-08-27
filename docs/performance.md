@@ -226,6 +226,63 @@ are the two dials that buy it back.
   real network transit. Point `BASE_URL` at the LAN address from another machine
   to include it.
 
+## Sharpness: what moves it, and what only looks like it does
+
+Measured on a text-heavy page at 1080p, on the reference machine.
+
+**Codec: no.** JPEG at quality 100 against lossless PNG, same page, same scale:
+
+| Codec | Detail (Laplacian variance) | KB/frame | Mbps | CPU |
+|---|---|---|---|---|
+| JPEG q100 | 8481 | 56 | 13.9 | 7.3% |
+| PNG | 8559 (+0.9%) | 80 | 19.8 | 7.1% |
+
+PNG costs 43% more bandwidth to deliver under 1% more detail: at quality 100
+JPEG is already close to lossless on screen content. On a photographic page the
+two were within 10% on bytes and 0.6% on detail. There is deliberately no codec
+switch - the stream is JPEG and `STREAM_QUALITY` is the dial.
+
+**Device scale factor: yes, for retina clients.**
+
+| DEVICE_SCALE_FACTOR | Frame | Detail, 1x grid | Detail, retina grid | KB/frame | Mbps | CPU |
+|---|---|---|---|---|---|---|
+| 1 | 1920x912 | 8481 | 421 | 56 | 13.8 | 7.2% |
+| 2 | 3840x1824 | 7502 (-12%) | 2996 (+7.1x) | 147 | 36.6 | 17.2% |
+
+Both feeds are judged on the same display grid, because raw variance is not
+comparable across resolutions: "1x grid" is what a plain monitor shows, "retina
+grid" is what a 2x panel shows - where a 1x feed gets upscaled and a 2x feed
+lands 1:1. So at 2 a retina viewer sees roughly seven times the fine detail,
+while a 1x viewer sees a slightly softer image for 2.6x the bytes.
+
+The default is 1, and the setting is a dial rather than a switch: any value from
+1 to 3 works, fractions included. The value worth using follows from the client,
+not from taste -
+
+    useful DSF = (canvas CSS width x client devicePixelRatio) / VIEWPORT_WIDTH
+
+- because past that ratio the frame carries pixels the panel cannot show. On a
+retina laptop that is around 1.3 windowed and 1.8 maximised, which is why 2 was
+measurably oversupplying by ~55% in the run above. `1.5` is verified end to end
+(frame 2880 wide, `--force-device-scale-factor=1.5`, screen 3840x2160); its
+bandwidth sits between the two rows and is not separately measured.
+
+It is browser-wide and applied at launch, so it cannot be a per-viewer setting
+without restarting Chromium - `Emulation` cannot move it per tab, as below.
+
+Two traps this cost real time, both worth keeping written down:
+
+- CDP's `Emulation.setDeviceMetricsOverride` takes a `deviceScaleFactor`, and
+  setting it *looks* like it works - the page reports the new
+  `devicePixelRatio` - while frames keep arriving at 1920x912 and slightly
+  softer, because the page renders at 2x and is squeezed back into a 1x window
+  surface. The scale of a captured surface is a launch-time property, so
+  `--force-device-scale-factor` is what changes it. `launchargs.test.ts` pins
+  that flag so the knob cannot go back to reporting success and doing nothing.
+- The Xvfb screen must scale with it (`MAX_VIEWPORT_* x DSF`, done in
+  `docker-entrypoint.sh`), or the window is clipped and the capture comes back
+  black - the same failure as a viewport larger than its screen, below.
+
 ## Geometry: one rule, and never bigger than the screen
 
 A tab's viewport comes from a single function (`viewportFor` in `TabManager.ts`)
