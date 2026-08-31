@@ -445,6 +445,7 @@ Full reasoning, including the options rejected and what each choice costs:
 
 | | |
 |---|---|
+| **[team-guide.md](docs/team-guide.md)** | **start here if you just want to run it and share it** — setup, usage, ngrok, troubleshooting, plain-language settings |
 | [architecture.md](docs/architecture.md) | components, data flow, failure behaviour, scale-out seams |
 | [decisions.md](docs/decisions.md) | ADRs: streaming, input, sync, lifecycle, discovery, auth, persistence |
 | [protocol.md](docs/protocol.md) | every message, the input envelope, the binary frame format |
