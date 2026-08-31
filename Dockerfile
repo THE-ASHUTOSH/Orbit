@@ -72,7 +72,15 @@ COPY --from=build /build/apps/web/dist ./web
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-ENV DISPLAY=:99 \
+# Stamped at build time so `docker inspect` can tell you what you are running.
+ARG ORBIT_VERSION=dev
+LABEL org.opencontainers.image.title="Orbit" \
+      org.opencontainers.image.description="Shared multi-user browser: one real Chromium, streamed per tab, several people working in different tabs at once" \
+      org.opencontainers.image.version="${ORBIT_VERSION}" \
+      org.opencontainers.image.source="https://github.com/THE-ASHUTOSH/Orbit" \
+      org.opencontainers.image.licenses="MIT"
+ENV ORBIT_VERSION=${ORBIT_VERSION} \
+DISPLAY=:99 \
     NODE_ENV=production \
     APP_PORT=3030 \
     SERVER_HOST=0.0.0.0 \

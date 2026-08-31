@@ -1,0 +1,97 @@
+# =============================================================================
+# Orbit, from the published image. No source code needed.
+#
+#   1. save this file as docker-compose.yml
+#   2. create a .env next to it with SESSION_SECRET and ADMIN_PASSWORD
+#   3. docker compose up -d
+#
+# Then open http://<this machine's IP>:3030 from any device on the network.
+#
+# This mirrors docker-compose.yml in the repository, minus the build section -
+# keep the two in step when either changes.
+# =============================================================================
+
+name: orbit
+
+services:
+  app:
+    image: theashutosh/orbit:${ORBIT_TAG:-latest}
+    container_name: orbit
+    restart: unless-stopped
+
+    # tini as PID 1: Chromium reparents helper processes, and something has to
+    # reap them or they pile up as zombies across browser restarts.
+    init: true
+
+    ports:
+      - '${APP_BIND:-0.0.0.0}:${APP_PORT:-3030}:3030'
+
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_PORT: 3030
+      SERVER_HOST: 0.0.0.0
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env - run "openssl rand -hex 32"}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      VIEWPORT_WIDTH: ${VIEWPORT_WIDTH:-1920}
+      VIEWPORT_HEIGHT: ${VIEWPORT_HEIGHT:-1080}
+      MAX_FPS: ${MAX_FPS:-30}
+      PIN_VIEWPORT: ${PIN_VIEWPORT:-true}
+      DEVICE_SCALE_FACTOR: ${DEVICE_SCALE_FACTOR:-1}
+      STREAM_QUALITY: ${STREAM_QUALITY:-80}
+      MAX_VIEWPORT_WIDTH: ${MAX_VIEWPORT_WIDTH:-2560}
+      MAX_VIEWPORT_HEIGHT: ${MAX_VIEWPORT_HEIGHT:-1440}
+      MAX_TABS: ${MAX_TABS:-20}
+      MAX_USERS: ${MAX_USERS:-50}
+      CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
+      HOME_URL: ${HOME_URL:-https://www.google.com}
+      DEVTOOLS_ENABLED: ${DEVTOOLS_ENABLED:-false}
+      CHROMIUM_TIMEZONE: ${CHROMIUM_TIMEZONE:-UTC}
+      TAB_OWNERSHIP: ${TAB_OWNERSHIP:-true}
+      PERSIST_SESSION_COOKIES: ${PERSIST_SESSION_COOKIES:-true}
+      # Multicast does not cross a Docker bridge network, so .local discovery
+      # needs network_mode: host (Linux only). The IP address always works.
+      MDNS_ENABLED: ${MDNS_ENABLED:-false}
+      # Set both when you put Orbit behind HTTPS (ngrok, Cloudflare, nginx).
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+
+    volumes:
+      # Everything that must survive a restart: the Chromium profile (cookies,
+      # logins, localStorage), the database, downloads and uploads. Nothing from
+      # your own filesystem is mounted in.
+      - browser-data:/data
+
+    # Chromium needs shared memory for the compositor; the 64MB container
+    # default is not enough.
+    shm_size: '1gb'
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=2g,mode=1777
+      - /home/browser:size=256m,uid=10001,gid=10001
+
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-4.0}'
+          memory: ${MEMORY_LIMIT:-4g}
+
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+volumes:
+  browser-data:
+    name: orbit-data
