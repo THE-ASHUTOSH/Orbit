@@ -48,6 +48,18 @@ cd Orbit
 ./orbit up
 ```
 
+Not a developer, or you would rather not build anything? Use the published
+image instead — no source code, ~475 MB download:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/THE-ASHUTOSH/Orbit/main/docker-compose.hub.yml -o docker-compose.yml
+# put SESSION_SECRET and ADMIN_PASSWORD in a .env next to it, then:
+docker compose up -d
+```
+
+[docs/team-guide.md](docs/team-guide.md) walks through that path in full,
+including sharing it beyond your network.
+
 That is the whole setup. On the first run the script:
 
 1. starts Docker if it is not already running,
@@ -445,6 +457,7 @@ Full reasoning, including the options rejected and what each choice costs:
 
 | | |
 |---|---|
+| **[team-guide.md](docs/team-guide.md)** | **start here if you just want to run it and share it** — setup, usage, ngrok, troubleshooting, plain-language settings |
 | [architecture.md](docs/architecture.md) | components, data flow, failure behaviour, scale-out seams |
 | [decisions.md](docs/decisions.md) | ADRs: streaming, input, sync, lifecycle, discovery, auth, persistence |
 | [protocol.md](docs/protocol.md) | every message, the input envelope, the binary frame format |
