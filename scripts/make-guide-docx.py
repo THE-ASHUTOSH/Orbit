@@ -283,6 +283,8 @@ steps([
     'Generates a random **SESSION_SECRET** for you. You never see it or choose it.',
     'Asks you to **choose an admin password**, twice, to catch typos. Eight characters or more.',
     'Fills in the rest of the settings with the values this project actually runs on.',
+    'Fetches the default extension and **asks whether you want it installed** - name, version and '
+    'what it can access. Answer once; it is remembered. Section 3.2 has the detail.',
     'Builds the browser, waits until it is genuinely healthy, and prints the two addresses - one '
     'for this machine, one for everyone else.',
 ])
@@ -597,6 +599,11 @@ callout('Why it opens as a tab',
         'those as native desktop windows, outside the page area that is streamed to you - so a '
         'floating popup could never appear on your screen. Orbit opens the extension\'s page as a '
         'tab instead. Same page, same buttons, just docked in a tab.', fill='E7F3EB')
+doc.add_paragraph(
+    'One may already be there: Orbit offers a default extension when it starts, and whoever set it '
+    'up decided whether to accept it. If the Extensions panel is empty, nobody installed anything '
+    'yet - ask an admin.'
+)
 para = doc.add_paragraph()
 para.add_run('Installing one (admins only): ').bold = True
 para.add_run(
@@ -691,6 +698,39 @@ doc.add_paragraph(
     'also explains why some extensions will not work at all. Try them: nothing breaks, and '
     'removing one is a click in the Admin panel plus a restart.'
 )
+
+para = doc.add_paragraph()
+para.paragraph_format.space_before = Pt(8)
+para.add_run('The default extension').bold = True
+doc.add_paragraph(
+    'Orbit ships with one: DOM Heist, from github.com/Astro-Dude/VibeExtract. Every ./orbit up and '
+    './orbit restart fetches the latest copy and, the first time, asks whether to install it:'
+)
+code([
+    '> Orbit ships with a default extension:',
+    '    DOM Heist 3.2.0',
+    '    from https://github.com/Astro-Dude/VibeExtract.git',
+    '    it can: activeTab, scripting, webNavigation, storage, downloads, clipboardWrite',
+    '  install it? [Y/n]',
+])
+bullets([
+    'You are asked **once**. The answer is remembered, so starting Orbit never nags.',
+    'After that, an update published upstream is installed on the next start without asking, and '
+    'the browser only restarts when something actually changed.',
+    'Say no and it is never installed or asked about again. To be asked afresh, delete '
+    '.orbit-cache/extensions/<name>.decision',
+    'To remove it later: ./orbit ext rm <id>, then restart the browser.',
+])
+doc.add_paragraph('To answer in advance, or to change which extensions are offered:')
+table(['Setting', 'Effect'], [
+    ['ORBIT_INSTALL_DEFAULT_EXTENSIONS=yes', 'Install without asking - for scripts and unattended machines.'],
+    ['ORBIT_INSTALL_DEFAULT_EXTENSIONS=no', 'Never install, never ask.'],
+    ['ORBIT_DEFAULT_EXTENSIONS="<git-url> ..."', 'Which extensions are offered. Empty means none at all.'],
+], widths=[2.9, 3.6])
+callout('It never blocks a start',
+        'An unreachable repository, a missing git, or no terminal to ask at prints a warning and '
+        'Orbit starts anyway. Nothing is installed without an answer - if there is nowhere to ask, '
+        'it is skipped.')
 
 doc.add_heading('3.3  Access from outside the network, with ngrok', level=2)
 doc.add_paragraph(

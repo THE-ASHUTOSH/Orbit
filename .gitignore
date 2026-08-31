@@ -3,6 +3,7 @@ dist/
 *.tsbuildinfo
 .env
 data/
+.orbit-cache/
 data-dev/
 bench-results/
 playwright-report/

@@ -150,6 +150,21 @@ Everything runs through one script. `./orbit help` prints this list.
 Chromium reads extensions only at launch, so follow any change with
 `./orbit restart`.
 
+**Default extensions.** `./orbit up` and `./orbit restart` fetch a set of
+extensions from git and offer to install them — currently
+[VibeExtract](https://github.com/Astro-Dude/VibeExtract) ("DOM Heist"). You are
+asked once per extension, with its name, version and permissions, and the answer
+is remembered; a later upstream commit is installed without asking again. The
+browser only restarts when something actually changed.
+
+| | |
+|---|---|
+| `ORBIT_DEFAULT_EXTENSIONS="<git-url> …"` | which ones. Empty installs none |
+| `ORBIT_INSTALL_DEFAULT_EXTENSIONS=yes\|no` | answer in advance — for automation, or to make it silent |
+
+Nothing here is fatal: an unreachable repository, a missing `git`, or no terminal
+to ask at warns and starts anyway.
+
 ```bash
 ./orbit ext store https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh
 ./orbit restart

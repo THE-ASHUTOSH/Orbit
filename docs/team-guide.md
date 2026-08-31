@@ -92,7 +92,9 @@ That one command does the whole setup:
 3. **generates a random `SESSION_SECRET`** for you; you never see or choose it,
 4. asks you to **choose an admin password**, twice, to catch typos (8+ chars),
 5. fills in the rest with the settings this project actually runs on,
-6. builds, waits until the browser is genuinely healthy, and prints both URLs.
+6. fetches the default extension and **asks whether to install it** — see
+   [Extensions](#extensions),
+7. builds, waits until the browser is genuinely healthy, and prints both URLs.
 
 ```
 > no .env yet - creating one
@@ -319,6 +321,37 @@ plus **Options** if it has a settings page.
 extension id — into "Store URL or extension id" and click Add, then restart the
 browser (⋮ Menu → Admin panel → Browser). Chromium reads extensions only at
 startup, so the restart is not optional. Non-admins do not see the Add box.
+
+#### The default extension
+
+Orbit ships with one: **DOM Heist**, from
+[Astro-Dude/VibeExtract](https://github.com/Astro-Dude/VibeExtract). Every
+`./orbit up` and `./orbit restart` fetches the latest copy and, the first time,
+asks whether to install it:
+
+```
+> Orbit ships with a default extension:
+    DOM Heist 3.2.0
+    from https://github.com/Astro-Dude/VibeExtract.git
+    it can: activeTab, scripting, webNavigation, storage, downloads, clipboardWrite
+  install it? [Y/n]
+```
+
+- You are asked **once**; the answer is remembered, so starting Orbit never nags.
+- Afterwards an upstream update installs on the next start without asking, and
+  the browser restarts only when something actually changed.
+- Say no and it is never installed or mentioned again. To be asked afresh,
+  delete `.orbit-cache/extensions/<name>.decision`.
+- To remove it later: `./orbit ext rm <id>` then `./orbit restart`.
+
+| Setting | Effect |
+|---|---|
+| `ORBIT_INSTALL_DEFAULT_EXTENSIONS=yes` | install without asking — scripts, unattended machines |
+| `ORBIT_INSTALL_DEFAULT_EXTENSIONS=no` | never install, never ask |
+| `ORBIT_DEFAULT_EXTENSIONS="<git-url> …"` | which ones are offered; empty means none |
+
+An unreachable repository, a missing `git`, or no terminal to ask at prints a
+warning and starts anyway — nothing is installed without an answer.
 
 > **Expect some not to work.** These are real Chrome extensions in a real
 > Chromium, and most behave normally — their keyboard shortcuts work too. But

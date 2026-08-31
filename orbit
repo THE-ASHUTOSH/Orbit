@@ -21,8 +21,18 @@ LOCAL="http://127.0.0.1:${PORT}"
 # address the volume directly, so a rename there has to be reflected here.
 DATA_VOLUME="${DATA_VOLUME:-orbit-data}"
 
+# Extensions every deployment should have, fetched from git so an update upstream
+# lands with the next start instead of waiting for someone to remember. Space
+# separated; set ORBIT_DEFAULT_EXTENSIONS= (empty) to install none.
+DEFAULT_EXTENSIONS="${ORBIT_DEFAULT_EXTENSIONS-https://github.com/Astro-Dude/VibeExtract.git}"
+EXT_CACHE=".orbit-cache/extensions"
+# Set by sync_default_extensions when something was actually installed, because
+# Chromium only reads extensions at launch - see cmd_up.
+EXT_CHANGED=0
+
 die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 info() { printf '\033[36m>\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m!\033[0m %s\n' "$*" >&2; }
 
 # The address other machines on the network can reach.
 lan_ip() {
@@ -181,12 +191,174 @@ wait_healthy() {
   return 1
 }
 
+# Fetch and install the default extensions.
+#
+# Deliberately never fatal: a deployment must still start when GitHub is
+# unreachable, when git is missing, or when a repo has moved. Each failure warns
+# and moves on.
+#
+# The installed commit is stamped so an unchanged extension does not trigger a
+# browser restart on every single `up`.
+sync_default_extensions() {
+  [ -n "$DEFAULT_EXTENSIONS" ] || return 0
+  command -v git >/dev/null 2>&1 || { warn "git not found - skipping default extensions"; return 0; }
+  command -v zip >/dev/null 2>&1 || { warn "zip not found - skipping default extensions"; return 0; }
+  mkdir -p "$EXT_CACHE"
+
+  # One tolerant login for the whole sweep. Failing to log in is a warning here,
+  # not the end of the start-up.
+  local cookie
+  cookie="$( (load_env; curl -s -i -m 5 -X POST "${LOCAL}/api/auth/login" \
+      -H 'Content-Type: application/json' \
+      -d "{\"username\":\"${ADMIN_USERNAME}\",\"password\":\"${ADMIN_PASSWORD}\"}" \
+    | grep -i '^set-cookie:' | sed 's/.*: //; s/;.*//' | tr -d '\r') 2>/dev/null || true)"
+  [ -n "$cookie" ] || { warn "could not sign in to install default extensions - skipping"; return 0; }
+
+  local url name dir head stamp manifest_dir
+  for url in $DEFAULT_EXTENSIONS; do
+    name="$(basename "$url" .git)"
+    dir="${EXT_CACHE}/${name}"
+    if [ -d "$dir/.git" ]; then
+      # Discard local drift rather than failing on a dirty cache: this directory
+      # is ours, not the user's working copy.
+      git -C "$dir" fetch --depth 1 --quiet origin 2>/dev/null &&
+        git -C "$dir" reset --hard --quiet FETCH_HEAD 2>/dev/null ||
+        warn "could not update ${name} - using the copy already fetched"
+    else
+      rm -rf "$dir"
+      git clone --depth 1 --quiet "$url" "$dir" 2>/dev/null || {
+        warn "could not fetch ${name} from ${url} - skipping"
+        continue
+      }
+    fi
+
+    # An extension is whatever directory holds the manifest: some repos keep it
+    # at the root, others ship it from a build directory.
+    manifest_dir=""
+    for candidate in "$dir" "$dir/dist" "$dir/build" "$dir/extension"; do
+      [ -f "$candidate/manifest.json" ] && { manifest_dir="$candidate"; break; }
+    done
+    [ -n "$manifest_dir" ] || { warn "${name} has no manifest.json - skipping"; continue; }
+
+    head="$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo unknown)"
+    stamp="${EXT_CACHE}/${name}.installed"
+    if [ "$(cat "$stamp" 2>/dev/null)" = "$head" ] && ext_installed "$name" "$cookie"; then
+      info "${name} already current ($(printf '%.7s' "$head"))"
+      continue
+    fi
+
+    want_extension "$name" "$manifest_dir" "$url" || continue
+
+    info "installing ${name} $(printf '%.7s' "$head")"
+    local tmp zipfile reply
+    tmp="$(mktemp -d)"
+    zipfile="${tmp}/${name}.zip"
+    # Zip the contents, not the wrapper directory - the server unpacks it as the
+    # extension root.
+    ( cd "$manifest_dir" && zip -qr "$zipfile" . ) 2>/dev/null
+    reply="$(curl -s -m 30 -X POST "${LOCAL}/api/admin/extensions/${name}.zip" \
+      -H "Cookie: $cookie" --data-binary "@${zipfile}" 2>/dev/null || true)"
+    rm -rf "$tmp"
+    # curl exits 0 for an error response, so judge it by the body.
+    # This route answers with the extension it unpacked; anything else is a
+    # failure, including an error JSON that curl still exited 0 for.
+    case "$reply" in
+      *'"extension"'*)
+        printf '%s' "$head" > "$stamp"
+        EXT_CHANGED=1
+        ;;
+      *) warn "could not install ${name} (${reply:-no response}) - continuing without it" ;;
+    esac
+  done
+}
+
+# Does the operator want this extension installed?
+#
+# Asked once and remembered, so a start never nags. The repository is fetched
+# before asking - cloning is a read-only fetch, and it is what makes an informed
+# prompt possible (real name, version and permissions). Nothing from it runs
+# until it is installed into the browser, which is what this gate controls.
+#
+# ORBIT_INSTALL_DEFAULT_EXTENSIONS=yes|no answers in advance, for automation and
+# for anyone who wants it to just happen. Delete
+# .orbit-cache/extensions/<name>.decision to be asked again.
+want_extension() {
+  local name="$1" dir="$2" url="$3" file="${EXT_CACHE}/${1}.decision"
+  case "${ORBIT_INSTALL_DEFAULT_EXTENSIONS:-ask}" in
+    1|y|yes|true|always) return 0 ;;
+    0|n|no|false|never)  return 1 ;;
+  esac
+  if [ -f "$file" ]; then
+    [ "$(cat "$file" 2>/dev/null)" = install ] && return 0
+    return 1
+  fi
+  # No terminal to ask at (a cron job, CI, a hook): do not install software
+  # nobody agreed to. Say how to answer in advance and move on.
+  if [ ! -t 0 ]; then
+    warn "${name} not installed - nothing to ask at. Pre-answer with ORBIT_INSTALL_DEFAULT_EXTENSIONS=yes"
+    return 1
+  fi
+
+  local label perms
+  label="$(ext_manifest_field "$dir" name) $(ext_manifest_field "$dir" version)"
+  perms="$(ext_manifest_field "$dir" permissions)"
+  printf '\n\033[36m>\033[0m Orbit ships with a default extension:\n'
+  printf '    %s\n' "${label:-$name}"
+  printf '    from %s\n' "$url"
+  [ -n "$perms" ] && printf '    it can: %s\n' "$perms"
+  printf '    it applies to everyone using this browser, and can be removed later with ./orbit ext rm\n'
+  printf '  install it? [Y/n] '
+  # An unreadable answer is not consent. Enter means yes (that is what [Y/n]
+  # promises), but end-of-input means nobody answered - which is how this
+  # silently installed itself when stdin closed early.
+  if ! read -r reply; then
+    printf '\n'
+    warn "no answer - ${name} not installed. Run ./orbit restart to be asked again"
+    return 1
+  fi
+  case "$reply" in
+    [nN]*) printf 'skip' > "$file";    info "skipped - it will not be asked about again"; return 1 ;;
+    *)     printf 'install' > "$file"; return 0 ;;
+  esac
+}
+
+# One field out of a manifest, without needing jq.
+ext_manifest_field() {
+  python3 - "$1/manifest.json" "$2" <<'EOF' 2>/dev/null || true
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+v = d.get(sys.argv[2])
+print(', '.join(v) if isinstance(v, list) else (v or ''))
+EOF
+}
+
+# Is an extension of this name already loaded? Checked as well as the stamp, so a
+# wiped data volume reinstalls even though the stamp survived.
+#
+# Takes the cookie as an argument rather than calling login(), which dies on
+# failure - nothing in the default-extension path may abort a start.
+ext_installed() {
+  curl -s -m 5 "${LOCAL}/api/admin/extensions" -H "Cookie: $2" 2>/dev/null | grep -q "\"${1}\""
+}
+
 cmd_up() {
   ensure_env
   info "building and starting"
   docker compose up -d --build
   info "waiting for the browser to come up"
   if wait_healthy; then
+    sync_default_extensions
+    # Extensions are read at launch, so a fresh install needs one restart to
+    # take effect. Only when something changed - otherwise every `up` would
+    # restart the browser for nothing.
+    if [ "$EXT_CHANGED" = 1 ]; then
+      info "restarting the browser so the new extensions load"
+      ORBIT_SKIP_EXT_SYNC=1 cmd_restart >/dev/null
+      wait_healthy || true
+    fi
     curl -s "${LOCAL}/api/health" | pretty
     cmd_url
   else
@@ -394,6 +566,9 @@ cmd_kick() {
 
 # Restarts Chromium, not the container: the profile and everyone's session survive.
 cmd_restart() {
+  # Before the restart, not after: the browser reads extensions as it launches,
+  # so syncing first means one restart instead of two.
+  [ "${ORBIT_SKIP_EXT_SYNC:-0}" = 1 ] || sync_default_extensions
   curl -s -X POST "${LOCAL}/api/admin/browser/restart" -H "Cookie: $(login)" | pretty
   info "browser restarting - clients reattach on their own"
 }
@@ -473,6 +648,13 @@ orbit - a shared Chromium for your LAN
   ./orbit ext store <url|id>        install from the Chrome Web Store
   ./orbit ext add <folder|zip>      install an extension, then ./orbit restart
   ./orbit ext rm <id>               uninstall one
+
+Default extensions
+  Fetched from git and offered on every `up` and `restart`. You are asked once
+  per extension and the answer is remembered.
+  ORBIT_DEFAULT_EXTENSIONS="<git-url> ..."   which ones (empty = none)
+  ORBIT_INSTALL_DEFAULT_EXTENSIONS=yes|no    answer in advance, no prompt
+  Re-ask by deleting .orbit-cache/extensions/<name>.decision
 
   ./orbit test                      full test suite (needs Chrome on this machine)
   ./orbit bench [users] [tabs] [s]  latency and throughput benchmark
