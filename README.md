@@ -48,18 +48,6 @@ cd Orbit
 ./orbit up
 ```
 
-Not a developer, or you would rather not build anything? Use the published
-image instead — no source code, ~475 MB download:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/THE-ASHUTOSH/Orbit/main/docker-compose.hub.yml -o docker-compose.yml
-# put SESSION_SECRET and ADMIN_PASSWORD in a .env next to it, then:
-docker compose up -d
-```
-
-[docs/team-guide.md](docs/team-guide.md) walks through that path in full,
-including sharing it beyond your network.
-
 That is the whole setup. On the first run the script:
 
 1. starts Docker if it is not already running,
@@ -177,7 +165,6 @@ panel is also where anyone opens an extension's popup or options page.
 | `./orbit test` | full suite: 121 tests, including real-Chromium integration |
 | `./orbit bench [users] [tabs] [secs]` | latency and throughput benchmark |
 | `./orbit stress [users] [tabs]` | stress, races and abuse, with pass/fail invariants |
-| `./release.sh` | publish the image to Docker Hub: shows what is published, asks for the new version, builds both CPU architectures, verifies what landed |
 | `./orbit env [--template]` | show the `.env` in use (secrets hidden), or the one a fresh run would write |
 | `./orbit dev` | run from source without Docker (API `:3030`, Vite `:5173`) |
 | `npm run typecheck` | TypeScript across every workspace |
@@ -458,7 +445,7 @@ Full reasoning, including the options rejected and what each choice costs:
 
 | | |
 |---|---|
-| [Orbit-Usage-Guide.docx](docs/Orbit-Usage-Guide.docx) | the usage half of the team guide as a Word document, to hand to people who only use Orbit |
+| [Orbit-Guide.docx](docs/Orbit-Guide.docx) | the whole guide as a Word document: setup, every feature, running it, troubleshooting — for handing to people rather than pointing at a repo |
 | **[team-guide.md](docs/team-guide.md)** | **start here if you just want to run it and share it** — setup, usage, ngrok, troubleshooting, plain-language settings |
 | [architecture.md](docs/architecture.md) | components, data flow, failure behaviour, scale-out seams |
 | [decisions.md](docs/decisions.md) | ADRs: streaming, input, sync, lifecycle, discovery, auth, persistence |

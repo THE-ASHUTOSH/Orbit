@@ -20,6 +20,19 @@ watching someone else's cursor. Everyone browses independently.
 2. [Set it up](#2-set-it-up)
 3. [Add your team](#3-add-your-team)
 4. [Using Orbit](#4-using-orbit)
+   - [Tabs belong to whoever opened them](#tabs-belong-to-whoever-opened-them)
+   - [Shortcuts](#shortcuts)
+   - [Capture keyboard](#capture-keyboard)
+   - [Tabs: everything you can do](#tabs-everything-you-can-do)
+   - [Zoom](#zoom)
+   - [Full screen](#full-screen)
+   - [Bookmarks and history](#bookmarks-and-history)
+   - [Downloads: getting a file onto your own computer](#downloads-getting-a-file-onto-your-own-computer)
+   - [Uploading a file to a page](#uploading-a-file-to-a-page)
+   - [Right-click menu](#right-click-menu)
+   - [Extensions](#extensions)
+   - [Who else is here, and how it is doing](#who-else-is-here-and-how-it-is-doing)
+   - [One thing to remember](#one-thing-to-remember)
 5. [Use it from anywhere with ngrok](#5-use-it-from-anywhere-with-ngrok)
 6. [Settings explained](#6-settings-explained)
 7. [Troubleshooting](#7-troubleshooting)
@@ -47,119 +60,103 @@ plug it in — sleeping the machine stops the browser for everybody.
 
 ## 2. Set it up
 
-About five minutes, most of it downloading.
+About five minutes, most of it downloading. Do this once, on one computer.
 
-### Step 1 — Install Docker
+### First, install Docker
 
-- **macOS / Windows:** download Docker Desktop from docker.com and install it.
-  Open it once so it is running (you will see a whale icon in your menu bar or
-  system tray).
+- **macOS / Windows:** download Docker Desktop from docker.com, install it, and
+  open it once so it is running (a whale icon appears in your menu bar or tray).
 - **Linux:** install Docker Engine using your distribution's instructions.
 
-Check it worked — open Terminal (macOS) or PowerShell (Windows) and run:
+Check it worked:
 
 ```bash
 docker --version
 ```
 
-You should see a version number. If you see "command not found", Docker is not
-installed or not running yet.
+A version number means you are ready. "command not found" means it is not
+installed, or not running yet.
 
-### Step 2 — Make a folder for Orbit
-
-```bash
-mkdir orbit
-cd orbit
-```
-
-### Step 3 — Get the setup file
+### Then get Orbit and start it
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/THE-ASHUTOSH/Orbit/main/docker-compose.hub.yml -o docker-compose.yml
+git clone https://github.com/THE-ASHUTOSH/Orbit.git
+cd Orbit
+./orbit up
 ```
 
-That is a small text file describing how to run Orbit. Nothing else to download
-by hand — the browser itself comes in the next step.
+That one command does the whole setup:
 
-### Step 4 — Create your settings file
+1. starts Docker if it is not already running,
+2. notices there is no `.env` and **creates one** — nothing to write by hand,
+3. **generates a random `SESSION_SECRET`** for you; you never see or choose it,
+4. asks you to **choose an admin password**, twice, to catch typos (8+ chars),
+5. fills in the rest with the settings this project actually runs on,
+6. builds, waits until the browser is genuinely healthy, and prints both URLs.
 
-You need exactly two values to start: a random secret, and an admin password.
+```
+> no .env yet - creating one
+  choose an admin password (8+ chars):
+  again:
+> wrote .env (chmod 600) - the same settings this project runs on
+> building and starting
+  open on this machine:  http://127.0.0.1:3030
+  open on the LAN:       http://192.168.1.42:3030
+```
 
-Generate the secret:
+The first run builds the browser, so give it a few minutes. Later starts take
+seconds.
+
+That admin password is for the user `admin`, and it is the only value you
+choose. Everything else is optional and changeable later — see
+[Settings explained](#6-settings-explained). `./orbit env --template` prints the
+file it would write, if you would rather read it first.
+
+> **Why the admin password matters.** Orbit shares one set of website logins
+> across everyone who uses it, so whoever gets in can see every account it is
+> signed into. Treat it like the key to a shared office. You can change it
+> later, and add or remove people, in the Admin panel.
+
+### Open it
+
+You do not have to work this out — `./orbit up` printed both addresses when it
+finished:
+
+```
+  open on this machine:  http://127.0.0.1:3030
+  open on the LAN:       http://192.168.1.42:3030
+```
+
+The second one is what you send your team. To see them again at any time:
 
 ```bash
-openssl rand -hex 32
+./orbit url        # just the addresses
+./orbit status     # the same, plus health and live figures
 ```
 
-Copy the long string it prints. Now create a file named `.env` in the same
-folder, containing:
+If you ever need to find it by hand — the terminal window is long gone, or you
+are checking whether it changed — each system reports it differently:
 
-```bash
-SESSION_SECRET=paste-the-long-random-string-here
-ADMIN_PASSWORD=pick-a-strong-password
-```
-
-Notes:
-
-- **`SESSION_SECRET`** keeps your sign-ins valid. Any long random string works.
-  Never share it.
-- **`ADMIN_PASSWORD`** is your own password for signing in the first time. Make
-  it a real password — on a shared browser, whoever gets in sees every account
-  the browser is signed into.
-- On Windows without `openssl`, this works instead:
-  `docker run --rm alpine sh -c "head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'"`
-
-Everything else has a sensible default. [Settings explained](#6-settings-explained)
-covers what you can change later.
-
-### Step 5 — Start it
-
-```bash
-docker compose up -d
-```
-
-The first run downloads the browser image — about 475 MB, which unpacks to
-roughly 1.8 GB on disk. Give it a few minutes on a normal connection. Later
-starts take seconds.
-
-Check that it is ready:
-
-```bash
-docker compose ps
-```
-
-Look for **healthy** in the status column. If it says `starting`, wait 30
-seconds and run it again.
-
-### Step 6 — Open it
-
-On the host machine itself:
-
-```
-http://localhost:3030
-```
-
-From anyone else's device, you need the host machine's address on the network:
-
-| Host machine | Command to find the address |
+| Host machine | Command to find it |
 |---|---|
-| macOS | `ipconfig getifaddr en0` (Wi-Fi) or `ipconfig getifaddr en1` |
+| macOS | `ipconfig getifaddr en0` (Wi-Fi) or `en1` |
 | Windows | `ipconfig` — look for "IPv4 Address" |
 | Linux | `hostname -I` |
 
-It looks like `192.168.1.42` or `172.20.1.240`. Everyone opens:
+Everyone opens that address with `:3030` on the end, and signs in with the
+username and password you gave them:
 
 ```
 http://192.168.1.42:3030
 ```
 
-Sign in with the username `admin` and the `ADMIN_PASSWORD` you chose.
+> **It can change.** That address belongs to the network, not to Orbit — it can
+> change when the host machine reconnects to Wi-Fi or restarts. If the link
+> stops working for your team, run `./orbit url` again and send the new one.
 
-> **Mac users on Chrome:** if that address gives you "This site can't be
-> reached — ERR_ADDRESS_UNREACHABLE", it is a macOS permission, not a network
-> problem. See [the fix](#chrome-on-macos-says-err_address_unreachable).
-
----
+> **Mac users on Chrome:** if that gives "This site can't be reached —
+> ERR_ADDRESS_UNREACHABLE", it is a macOS permission, not a network problem. See
+> [the fix](#chrome-on-macos-says-err_address_unreachable).
 
 ## 3. Add your team
 
@@ -228,19 +225,116 @@ and those keys go to Orbit instead.
 It applies to that one tab only, and only while you are on it. Turn it off the
 same way. You will see a small badge when it is on.
 
-### The rest of the menu
+### Tabs: everything you can do
 
-| Menu item | What it is for |
+| Action | How |
 |---|---|
-| Zoom | make the page bigger or smaller (top of the menu) |
-| New tab / Duplicate tab | as it sounds |
-| Full screen | the page fills your screen, controls stay visible |
-| Bookmarks / History | shared by everyone using Orbit |
-| Downloads | files downloaded in the shared browser, for you to save |
-| Extensions | install from the Chrome Web Store; needs a browser restart |
-| Appearance | light, dark, or follow your system |
-| Performance metrics | live frame rate and latency, if you are curious |
-| Sign out | ends your session only, not anyone else's |
+| New tab | the `+` on the tab strip, ⋮ Menu, or Option/Alt+T |
+| Close a tab | the `x` on the tab, or Option/Alt+W |
+| Reopen the tab you just closed | Option/Alt+Shift+T |
+| Switch tabs | click one, or Option/Alt+1…9 for the first nine |
+| Duplicate a tab | ⋮ Menu → Duplicate tab. The copy is yours |
+| Rename a tab | double-click it and type a name — useful when four tabs all say "Dashboard" |
+| See whose tab it is | hover it: the tooltip shows the title, the address and who opened it |
+
+A loading tab shows a spinning ring in place of its icon, plus a progress line
+over the page, so a slow site is distinguishable from a stuck one.
+
+### Zoom
+
+⋮ Menu, at the top. Set a percentage, or click the percentage to snap back to
+100%. It also shows the **streamed resolution** at that zoom — what the page is
+actually being rendered at.
+
+Zoom is per tab and shared: it changes how the page is rendered, not how your
+screen displays it, so anyone else on that tab sees the same thing.
+
+### Full screen
+
+Option/Alt+F, or ⋮ Menu → Full screen. The page fills your screen and Orbit's
+tab strip and toolbar stay visible, so you can still switch tabs. Same keys, or
+Escape, to leave.
+
+### Bookmarks and history
+
+- **Bookmark this page:** the star in the toolbar. Click again to remove.
+- **All of them:** ⋮ Menu → Bookmarks. Entries open in a new tab; `x` removes.
+- **History:** ⋮ Menu → History, with a search box — find the page a colleague
+  visited last week by typing part of its name.
+
+Both are **shared**: everyone sees the same lists, and what you visit is visible
+to your colleagues. The address bar suggests from that history as you type.
+
+### Downloads: getting a file onto your own computer
+
+Worth understanding, because it surprises people. A download is performed by the
+*shared* browser, so the file lands on the host machine — not yours. Getting it
+to your machine is a second, deliberate step.
+
+1. Click the download link as normal. A notice appears when it finishes.
+2. Open **⋮ Menu → Downloads**. The file is listed with its size.
+3. Click **Save**. *That* is when it arrives in your own Downloads folder.
+4. Click **delete** next to it once nobody needs it, to remove it from the host.
+
+Refresh re-reads the list if a download finished while the panel was open.
+
+> Downloads are shared: anything downloaded stays on the host machine until
+> someone deletes it, and everyone can see and save a copy.
+
+### Uploading a file to a page
+
+The reverse works too. When a page asks for a file, Orbit shows a file picker on
+**your** device and you choose from your own computer. The file is sent to the
+host first and then handed to the page — the shared browser cannot reach into
+your filesystem. That explains the brief pause on a large file, and means the
+file is briefly on the shared machine. Multiple files work where the page allows.
+
+### Right-click menu
+
+Right-clicking a page gives you Orbit's own menu, not your browser's:
+
+| On a link | On an image |
+|---|---|
+| Open link in new tab | Open image in new tab |
+| Copy link address | Copy image address |
+
+Copied addresses go to your own clipboard. For text, select it and use
+⌘C/Ctrl+C as usual. A tab opened from a link belongs to you, like any other.
+
+### Extensions
+
+Orbit runs real Chrome extensions — ad blocker, password manager, clipper — and
+they apply to everyone, because there is one browser.
+
+**Using one:** ⋮ Menu → Extensions. Each one has a button that opens its page,
+plus **Options** if it has a settings page.
+
+> **Why it opens as a tab.** In a normal browser an extension popup is a small
+> floating window, and Chromium draws those as native desktop windows — outside
+> the page area that is streamed to you, so a floating popup could never appear
+> on your screen. Orbit opens the extension's page as a tab instead: same page,
+> same buttons, docked in a tab.
+
+**Installing one (admins only):** paste a Chrome Web Store link — or just the
+extension id — into "Store URL or extension id" and click Add, then restart the
+browser (⋮ Menu → Admin panel → Browser). Chromium reads extensions only at
+startup, so the restart is not optional. Non-admins do not see the Add box.
+
+> **Expect some not to work.** These are real Chrome extensions in a real
+> Chromium, and most behave normally — their keyboard shortcuts work too. But
+> some will not. An extension whose popup is drawn as a native panel with no web
+> page behind it has nothing for Orbit to open, and the panel says "no page".
+> Anything that expects to talk to a program installed on your own computer, or
+> that wants you to sign in to the browser itself, will not behave as it does at
+> home. Trying one costs nothing: install it, look, remove it if it is no use.
+
+### Who else is here, and how it is doing
+
+- **The bottom strip** shows who is signed in, and whether your connection is
+  healthy, idle or reconnecting. Reconnecting retries on its own — no reload.
+- **Other people's cursors** appear over the page when you are on the same tab.
+- **Performance metrics** (⋮ Menu) shows live frame rate and delay.
+- **Appearance** (⋮ Menu) cycles light, dark and follow-my-system.
 
 ### One thing to remember
 
@@ -298,7 +392,7 @@ TRUST_PROXY=true
 Then apply them:
 
 ```bash
-docker compose up -d
+./orbit up
 ```
 
 **5. Share the `https://` link** and each person's username and password.
@@ -317,7 +411,7 @@ docker compose up -d
   Browsers refuse to store a secure cookie over plain HTTP, so people on your
   own network can no longer sign in there — everyone uses the `https://ngrok`
   link instead. Going back to local-only means removing those three lines and
-  running `docker compose up -d` again.
+  running `./orbit up` again.
 - **The free ngrok address changes** every time you restart ngrok, and you have
   to update `TRUSTED_ORIGINS` each time. ngrok's free plan includes one reserved
   domain — set it up in their dashboard and use
@@ -337,7 +431,7 @@ docker compose up -d
 ## 6. Settings explained
 
 All settings live in your `.env` file. Change a line, then run
-`docker compose up -d` to apply it. Only two are required; everything else has a
+`./orbit up` to apply it. Only two are required; everything else has a
 default.
 
 ### The two you must set
@@ -388,18 +482,18 @@ signed-in sessions. It ships off, and off is the right default.
 | `docker: command not found` | Docker is not installed, or Docker Desktop is not open yet |
 | `set SESSION_SECRET in .env` when starting | your `.env` is missing, empty, or not in the folder you ran the command from |
 | `port is already allocated` | something else uses 3030. Put `APP_PORT=3040` in `.env`, restart, use `:3040` |
-| Status stuck at `starting` | give it 45 seconds; then `docker compose logs --tail 50` |
+| Status stuck at `starting` | give it 45 seconds; then `./orbit logs 50` |
 | Container keeps restarting | usually not enough memory. Raise `MEMORY_LIMIT`, or close other heavy apps |
 | Works on the host, not from other devices | see [below](#other-devices-cannot-reach-it) |
 | Chrome on Mac: `ERR_ADDRESS_UNREACHABLE` | see [below](#chrome-on-macos-says-err_address_unreachable) |
 | Page is blank or black | click reload in Orbit's toolbar; if it persists, ⋮ Menu → Admin panel → Browser → restart |
-| Text looks soft on a Retina screen | set `DEVICE_SCALE_FACTOR=1.5`, then `docker compose up -d` |
+| Text looks soft on a Retina screen | set `DEVICE_SCALE_FACTOR=1.5`, then `./orbit up` |
 | Laggy or stuttering | lower `STREAM_QUALITY` to 70 and `MAX_FPS` to 30; fewer open tabs also helps |
 | Everyone signed out of websites after a restart | set `PERSIST_SESSION_COOKIES=true` |
 | Installed an extension, cannot see it | extensions load when the browser starts: ⋮ Menu → Admin panel → Browser → restart |
 | Your own browser's shortcut fires instead of Orbit's | turn on Capture keyboard (Option/Alt+K) |
 | Cannot sign in over the ngrok link | see [ngrok problems](#ngrok-the-link-opens-but-i-cannot-sign-in) |
-| Forgot the admin password | sign in as another admin and reset it in Admin panel → Users. If you have no admin left, `docker compose down -v` wipes everything and starts fresh — including all logins |
+| Forgot the admin password | sign in as another admin and reset it in Admin panel → Users. If you have no admin left, `./orbit down --wipe` wipes everything and starts fresh — including all logins |
 
 ### Chrome on macOS says ERR_ADDRESS_UNREACHABLE
 
@@ -439,7 +533,7 @@ Work through these:
 1. **Same network?** Phone on mobile data, or a "guest" Wi-Fi that isolates
    devices, will not reach it.
 2. **Right address?** Re-check it with the command in
-   [Step 6](#step-6--open-it). It changes when the host machine reconnects.
+   [Open it](#open-it). It changes when the host machine reconnects.
 3. **Firewall on the host?** Allow incoming connections on port 3030:
    - macOS: System Settings → Network → Firewall → Options → allow Docker
    - Windows: Windows Defender Firewall → Allow an app → Docker Desktop
@@ -454,7 +548,7 @@ Two usual causes:
 
 - **`TRUSTED_ORIGINS` does not match.** It must be the exact address including
   `https://` and no trailing slash — `https://abc-123.ngrok-free.app`. If your
-  ngrok address changed, update the line and run `docker compose up -d`.
+  ngrok address changed, update the line and run `./orbit up`.
 - **You are on the plain `http://` address with `SECURE_COOKIES=true`.** The
   browser will not keep the sign-in cookie. Use the `https://ngrok` link, or
   remove `SECURE_COOKIES` to go back to local use.
@@ -470,24 +564,31 @@ Run these in your Orbit folder.
 
 | Command | Does |
 |---|---|
-| `docker compose up -d` | start Orbit, and apply any `.env` changes |
-| `docker compose ps` | is it running and healthy? |
-| `docker compose stop` | stop it, keep everything |
-| `docker compose logs --tail 50` | recent messages, useful when something is wrong |
-| `docker compose pull && docker compose up -d` | update to the latest Orbit |
-| `docker compose down -v` | ⚠️ delete everything — all users, logins and history |
+| `./orbit up` | start Orbit, and apply any `.env` changes |
+| `./orbit status` | is it running and healthy? |
+| `./orbit down` | stop it, keep everything |
+| `./orbit logs 50` | recent messages, useful when something is wrong |
+| `git pull && ./orbit up` | update to the latest Orbit |
+| `./orbit down --wipe` | ⚠️ delete everything — all users, logins and history |
 
 Your data — logins, bookmarks, history, users — lives in a Docker volume called
-`orbit-data`, separate from the browser image, so updating Orbit keeps all of
-it. To copy it somewhere safe:
+`orbit-data`, separate from the browser itself, so updating Orbit keeps all of
+it. To save a copy:
 
 ```bash
-docker run --rm -v orbit-data:/data -v "$PWD":/backup alpine \
-  tar czf /backup/orbit-backup.tar.gz -C /data .
+./orbit backup                      # writes orbit-backup-<date>.tar.gz
+./orbit restore orbit-backup-....tar.gz
 ```
 
----
+Keep that file somewhere sensible: it contains the browser's saved logins.
 
-Running Orbit from the source code instead of the published image? The
-[README](../README.md) covers the `./orbit` helper script, which wraps all of
-the above plus benchmarks and user management from the terminal.
+A few more the helper script gives you:
+
+| Command | Does |
+|---|---|
+| `./orbit url` | just the addresses, to paste to your team |
+| `./orbit user <name> [role]` | create an account from the terminal |
+| `./orbit users` | list everyone |
+| `./orbit restart` | restart the browser, keeping everyone signed in |
+| `./orbit env` | show the settings in use, with secrets hidden |
+| `./orbit help` | everything else |
